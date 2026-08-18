@@ -1,33 +1,47 @@
-# Manthan: LLM-Driven Workflow Pipeline
+# Manthan: Local-First LLM-Driven Workflow Pipeline
 
-Manthan is an automated pipeline for ingesting, grading, enriching, and storing data derived from chat communications. It processes raw chat exports (currently supporting WhatsApp) to extract insights, resources, and topics, leveraging LLMs for automated analysis and classification.
+Manthan is a **local-first, automated pipeline** designed to ingest, grade, enrich, and map knowledge derived from chat communications (initially WhatsApp). By running LLM analysis locally, it transforms fragmented chat history into structured insights, resources, and relationships without relying on external cloud processing.
 
-## Key Features
+## Core Philosophy
+- **Privacy-First**: All LLM processing occurs locally. No chat history leaves your machine.
+- **Local-First Knowledge**: Insights are stored in local graph (Neo4j) and vector (Qdrant) databases.
+- **Reproducible**: Every pipeline run generates metric reports, allowing for performance tracking across different LLM models and versions.
 
-- **Automated Ingestion**: Parses raw chat exports.
-- **Grading & Classification**: Uses LLMs to grade message quality and categorize them into topics.
-- **Link Enrichment**: Extracts links, scrapes content, and summarizes them for knowledge graph storage.
-- **Knowledge Graph Storage**: Stores structured entities, topics, and relationships in Neo4j and Qdrant.
+## Pipeline Performance Metrics
 
-## Metrics Overview
+We track our pipeline's health through automated metric generation.
 
-The pipeline's performance is tracked via comprehensive metric reports.
+| Metric | Actual Run (2026-08-18) | Synthetic Run (2026-08-17) |
+| :--- | :--- | :--- |
+| **Ingestion** | 146 msgs (131 kept) | 44 msgs (30 kept) |
+| **Grading Confidence (Mean)** | **0.893** | **0.947** |
+| **Enriched Records** | 49 | 8 |
+| **Total Links Extracted** | 57 | 9 |
+| **Relationship Density** | 116 relationships | N/A (Node Error) |
 
-### Actual Data Performance (2026-08-18)
-- **Ingestion**: 146 messages parsed, 131 kept.
-- **Grading**: Strong quality distribution (Mean confidence: 0.893).
-- **Link Processing**: 57 total links extracted from 49 records.
-- **Storage**: 116+ relationships in Neo4j, 16+ vector points in Qdrant.
+*(Full reports available in `metrics/manthan_report.md` and `metrics/synthetic_report.md`)*
 
-### Synthetic Data Performance (2026-08-17)
-- **Ingestion**: 44 messages parsed, 30 kept.
-- **Grading**: High confidence metrics (Mean confidence: 0.947).
-- **Link Processing**: 9 total links extracted from 8 records.
+## Architecture
 
-*(See `metrics/manthan_report.md` and `metrics/synthetic_report.md` for full details.)*
+1.  **Ingestion Layer**: Sanitizes and parses raw chat exports.
+2.  **Grading Engine**: Uses locally hosted LLMs to grade message quality (1–5) and extract topical categories.
+3.  **Enrichment Pipeline**: Extracts links, scrapes URL content, and generates summaries.
+4.  **Graph Storage**:
+    *   **Neo4j**: Maps entities (topics, people, organizations, links).
+    *   **Qdrant**: Vector-based semantic search across all enriched records.
 
-## Getting Started
+## Local Setup
 
-1.  **Environment Setup**: Install dependencies using `uv`. Ensure `.env` is configured for necessary APIs (LLMs, Databases).
-2.  **Pipeline Execution**: Run the ingestion and processing scripts (e.g., `main.py`).
-3.  **Analysis**: Generate reports using `scripts/metrics_report.py`.
+### Prerequisites
+- `uv` for environment/dependency management.
+- Local LLM backend (e.g., llama.cpp).
+- Databases: Neo4j (Graph), Qdrant (Vector).
+
+### Quick Start
+1.  **Configure**: Clone `.env.example` to `.env` and set your local DB endpoints.
+2.  **Sync**: Run `uv sync` to install dependencies.
+3.  **Process**: Execute `python main.py` to run the full pipeline.
+4.  **Evaluate**: Run `python scripts/metrics_report.py` to regenerate the metrics report after a run.
+
+## License & Privacy
+Manthan is designed for individual knowledge management. As a local-first tool, ensure your own local databases (Neo4j/Qdrant) are secured according to your data sensitivity requirements.
