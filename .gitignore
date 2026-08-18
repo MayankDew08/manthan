@@ -1,0 +1,26 @@
+# System / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Environment / Dependencies
+.env
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+
+# Data / Artifacts
+state.sqlite*
+grading_checkpoint.json
+graded_messages.json
+scraped_links.json
+blocked_links.json
+ask_user_links.json
+enriched_messages.json
+last_run.json
+*.jsonl
+
+# Logs / Temp
+*.log
+tmp/
