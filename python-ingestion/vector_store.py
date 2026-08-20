@@ -1,3 +1,5 @@
+"""Store searchable message and link embeddings in Qdrant."""
+
 import os
 import uuid
 from typing import Callable, List, Optional
@@ -9,6 +11,8 @@ from embedder import embed_batch, embed_text, embedding_dim
 
 
 class VectorStore:
+    """Qdrant gateway that owns embedding and collection operations."""
+
     def __init__(self, host: Optional[str] = None, port: Optional[int] = None,
                  collection: Optional[str] = None,
                  vector_size: Optional[int] = None,
@@ -27,6 +31,7 @@ class VectorStore:
         self.client.close()
 
     def ensure_collection(self):
+        """Create the configured cosine-similarity collection when absent."""
         if not self.client.collection_exists(self.collection):
             self.client.create_collection(
                 collection_name=self.collection,
@@ -38,6 +43,7 @@ class VectorStore:
         return self.embed_fn(text)
 
     def upsert_message(self, msg: dict):
+        """Embed a message under a deterministic sender/timestamp point ID."""
         text = msg.get("synthesized_text") or msg.get("original_text") or ""
         sender = msg.get("sender") or ""
         sent_at = msg.get("sent_at") or msg.get("datetime_iso") or ""
@@ -58,6 +64,7 @@ class VectorStore:
         self.client.upsert(collection_name=self.collection, points=[point])
 
     def upsert_link(self, link: dict):
+        """Embed a link summary when the record contains searchable content."""
         url = link.get("url") or ""
         summary = link.get("summary") or ""
         what_it_is = link.get("what_it_is") or ""
@@ -84,6 +91,7 @@ class VectorStore:
         self.client.upsert(collection_name=self.collection, points=[point])
 
     def add_batch(self, items: List[tuple]) -> None:
+        """Embed aligned ``(id, text, payload)`` tuples in one Qdrant upsert."""
         if not items:
             return
         ids = [item[0] for item in items]
@@ -95,6 +103,7 @@ class VectorStore:
         self.client.upsert(collection_name=self.collection, points=points)
 
     def search(self, query: str, limit: int = 10) -> list:
+        """Return raw Qdrant hits for an embedded query."""
         vector = self._embed(query)
         return self.client.search(
             collection_name=self.collection,

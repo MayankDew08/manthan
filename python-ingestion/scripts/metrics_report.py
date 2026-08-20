@@ -1,3 +1,5 @@
+"""Generate a privacy-safe Markdown report from local run artifacts."""
+
 import argparse
 import json
 import os
@@ -37,6 +39,7 @@ def _source_summary(message_count: int,
 
 
 def _storage() -> dict:
+    """Collect best-effort live storage counts without aborting the report."""
     out = {"neo4j": {}, "qdrant": {}}
     try:
         from store import KnowledgeStore
@@ -67,6 +70,7 @@ def _storage() -> dict:
 
 def build_report(chat_path: str,
                  chat_label: str = PUBLIC_SOURCE_LABEL) -> str:
+    """Render aggregate pipeline, LLM, link, and storage metrics as Markdown."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [f"# Manthan metrics report", f"", f"_generated {now}_", ""]
 

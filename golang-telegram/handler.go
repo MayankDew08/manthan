@@ -31,6 +31,7 @@ type TelegramUser struct {
 	UserName  string
 }
 
+// QueryJob is the payload pushed to the Redis query stream.
 type QueryJob struct {
 	JobID            string    `json:"job_id"`
 	TelegramUpdateID int       `json:"telegram_update_id"`
@@ -40,6 +41,7 @@ type QueryJob struct {
 	ReceivedAt       time.Time `json:"received_at"`
 }
 
+// IngestJob is the payload pushed to the Redis ingest stream.
 type IngestJob struct {
 	JobID             string    `json:"job_id"`
 	TelegramUpdateID  int       `json:"telegram_update_id"`
@@ -55,6 +57,7 @@ type IngestJob struct {
 var allowedUserID int64
 
 func handleUpdate(ctx context.Context, update TelegramUpdate, queue *Queue) error {
+	// The Go bridge only authorizes and routes; all grading/search work happens downstream.
 	if update.Message == nil {
 		return nil
 	}
@@ -116,6 +119,7 @@ func handleUpdate(ctx context.Context, update TelegramUpdate, queue *Queue) erro
 }
 
 func classify(text string) string {
+	// Prefix-based routing keeps Telegram usage simple without a separate command parser.
 	text = strings.TrimSpace(text)
 
 	if strings.HasPrefix(text, "/ask") {
@@ -148,6 +152,7 @@ func cleanText(text string) string {
 }
 
 func parseIngest(text string) (content string, skipGrading bool) {
+	// "--trusted" lets the operator bypass grading for already-vetted notes.
 	content = strings.TrimSpace(text)
 
 	if strings.HasPrefix(content, "/ingest") {
@@ -163,6 +168,7 @@ func parseIngest(text string) (content string, skipGrading bool) {
 }
 
 func parseVia(text string) (via string, rest string) {
+	// "/via Name: ..." preserves the original speaker when forwarding someone else's note.
 	text = strings.TrimSpace(text)
 
 	if !strings.HasPrefix(text, "/via") {

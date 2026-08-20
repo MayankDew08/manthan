@@ -1,3 +1,5 @@
+"""Consume Redis query jobs, call search, and return results to Telegram."""
+
 import json
 from pathlib import Path
 
@@ -25,6 +27,7 @@ r = redis.Redis(
 
 
 def ensure_group():
+    """Create the query consumer group once and tolerate repeat starts."""
     try:
         r.xgroup_create(
             STREAM,
@@ -38,6 +41,7 @@ def ensure_group():
 
 
 def send_telegram_message(chat_id: int, text: str):
+    """Send search results back to the originating Telegram chat."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
     response = requests.post(
@@ -53,6 +57,7 @@ def send_telegram_message(chat_id: int, text: str):
 
 
 def format_results(data: dict) -> str:
+    """Render search hits into a message that fits Telegram reasonably well."""
     results = data.get("results", [])
     if not results:
         return "No results found."
@@ -68,6 +73,7 @@ def format_results(data: dict) -> str:
 
 
 def main():
+    """Block on the query stream and acknowledge only after a reply is sent."""
     ensure_group()
 
     print("Query worker started")

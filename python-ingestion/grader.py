@@ -1,3 +1,5 @@
+"""Grade messages with a local LLM using resumable, two-pass processing."""
+
 import hashlib
 import json
 import os
@@ -32,6 +34,7 @@ def _sha(text: str) -> str:
 
 
 def _grader_sha() -> str:
+    """Fingerprint prompts and model so incompatible checkpoints are ignored."""
     digest = hashlib.sha1()
     digest.update(f"checkpoint-v{CHECKPOINT_VERSION}\0{llm.MODEL}".encode())
     for path in GRADER_PROMPTS:
@@ -87,6 +90,8 @@ def _save_checkpoint(cp: dict) -> None:
 
 @dataclass
 class GradeResult:
+    """Structured quality decision and metadata retained for one message."""
+
     quality: int
     confidence: float
     category: str
@@ -129,6 +134,7 @@ def _messages_sha(messages) -> str:
 
 
 def _restore_grades(stored, messages) -> List["GradeResult"] | None:
+    """Restore cached grades only when their source texts still match in order."""
     if not isinstance(stored, list) or len(stored) != len(messages):
         return None
     restored = []
@@ -151,6 +157,7 @@ def _with_cached(cp: dict, pass_name: str, key: str,
 
 def _pack(items, budget: int, size_fn: Callable,
           max_batch: int = MAX_BATCH) -> List[list]:
+    """Pack items into batches bounded by both token estimate and item count."""
     batches = []
     cur = []
     cur_tokens = 0
@@ -168,6 +175,7 @@ def _pack(items, budget: int, size_fn: Callable,
 
 
 def _merge_chunk_grades(results: List["GradeResult"], original_text: str) -> "GradeResult":
+    """Collapse grades for an oversized message while retaining its best signal."""
     best = max(results, key=lambda r: r.quality)
     topics = []
     for r in results:
@@ -200,6 +208,7 @@ def grade_batch(batch: list, system_prompt: str, user_content: str,
                 category_fallback: List[str] = None,
                 max_tokens: int = COMPLETION_RESERVE,
                 disable_thinking: bool = GRADER_DISABLE_THINKING) -> List[GradeResult]:
+    """Request and validate one ordered JSON grade for every batched message."""
     data = llm.call_completion(system_prompt, user_content, max_tokens=max_tokens,
                                tag="grader", disable_thinking=disable_thinking)
     if len(data) != len(batch):
@@ -218,6 +227,7 @@ def grade_batch(batch: list, system_prompt: str, user_content: str,
 
 
 def grade_messages(messages: list) -> List[GradeResult]:
+    """Run pass-one grading, splitting messages that exceed the prompt budget."""
     system_prompt = load_system_prompt("system_prompt_v2.txt")
     budget = budget_for(system_prompt)
     batches = _pack(messages, budget, size_fn=lambda m: estimate_tokens(_msg_text(m)))
@@ -270,6 +280,7 @@ def grade_messages(messages: list) -> List[GradeResult]:
 
 
 def grade_pass2(messages: list) -> List[GradeResult]:
+    """Regrade only quality-three messages with local conversation context."""
     target = [i for i, m in enumerate(messages) if m.quality == 3]
     print(f"[grader] pass2: re-grading {len(target)} borderline (quality=3) messages")
     if not target:

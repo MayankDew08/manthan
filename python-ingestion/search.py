@@ -1,3 +1,5 @@
+"""Combine semantic Qdrant search with Neo4j graph-based retrieval."""
+
 import re
 from typing import List, Optional
 
@@ -27,6 +29,7 @@ def _terms(query: str) -> List[str]:
 
 def _qdrant_pass(payload: dict, topics: Optional[List[str]],
                  min_quality: Optional[int]) -> bool:
+    """Apply caller filters to a Qdrant payload after vector retrieval."""
     if min_quality is not None and payload.get("type") == "message":
         if (payload.get("quality") or 0) < min_quality:
             return False
@@ -81,6 +84,12 @@ def search(query: str, *, topics: Optional[List[str]] = None,
            min_quality: Optional[int] = None, top_k: int = 10,
            vs: Optional[VectorStore] = None,
            store: Optional[KnowledgeStore] = None) -> List[dict]:
+    """Return ranked semantic and graph hits, deduplicated by linked URL.
+
+    Qdrant supplies the primary ranking. Neo4j contributes lexical, entity, and
+    topic matches at a lower score, while ``topics`` and ``min_quality`` filter
+    eligible records before the final top-k slice.
+    """
     own_vs = vs is None
     own_store = store is None
     if own_vs:
@@ -156,6 +165,7 @@ def search(query: str, *, topics: Optional[List[str]] = None,
 
 
 def _related_links(store: KnowledgeStore, props: dict) -> list:
+    """Expand a message hit with links connected to the same graph node."""
     with store.driver.session() as session:
         rows = session.run(
             """
@@ -172,6 +182,7 @@ def _related_links(store: KnowledgeStore, props: dict) -> list:
 
 
 def _link_attribution(store: KnowledgeStore, payload: dict) -> dict:
+    """Find the earliest message attribution for a link search hit."""
     with store.driver.session() as session:
         row = session.run(
             """
@@ -188,6 +199,7 @@ def _link_attribution(store: KnowledgeStore, payload: dict) -> dict:
 def _graph_candidates(store: KnowledgeStore, terms: List[str],
                       topics: Optional[List[str]], min_quality: Optional[int],
                       scale: float) -> List[dict]:
+    """Collect lexical, entity, topic, and link matches from Neo4j."""
     results = []
     with store.driver.session() as session:
         for row in session.run(

@@ -1,3 +1,5 @@
+"""Shared runtime configuration for the Redis-backed Telegram workers."""
+
 import os
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -5,6 +7,7 @@ from urllib.parse import urlsplit
 
 @dataclass(frozen=True)
 class WorkerConfig:
+    """Normalized worker settings after validating the required environment."""
     bot_token: str
     redis_host: str
     redis_port: int
@@ -12,6 +15,7 @@ class WorkerConfig:
 
 
 def load_worker_config() -> WorkerConfig:
+    """Parse and validate the env vars consumed by both worker entrypoints."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     if not bot_token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required")

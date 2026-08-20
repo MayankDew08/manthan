@@ -1,3 +1,5 @@
+"""Call a local OpenAI-compatible LLM and track approximate token usage."""
+
 import os
 import json
 import time
@@ -30,6 +32,8 @@ REQUEST_TIMEOUT = int(os.environ.get("LLAMA_REQUEST_TIMEOUT", 600))
 
 @dataclass
 class UsageStats:
+    """Process-local counters collected across LLM requests."""
+
     llm_calls: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -66,11 +70,13 @@ def estimate_tokens(text: str) -> int:
 
 
 def budget_for(system_prompt: str, completion_reserve: int = COMPLETION_RESERVE) -> int:
+    """Estimate the input budget used for batching and chunking prompts."""
     return max(1, CONTEXT_WINDOW - estimate_tokens(system_prompt)
                - completion_reserve - SAFETY_MARGIN)
 
 
 def clean_json(raw: str) -> List[dict]:
+    """Normalize a fenced object or nested array response into JSON objects."""
     if not isinstance(raw, str):
         return []
     text = raw.strip()
@@ -95,6 +101,7 @@ def clean_json(raw: str) -> List[dict]:
 
 
 def split_text(text: str, chunk_tokens: int) -> List[str]:
+    """Split text near natural separators using the repository's token estimate."""
     step_chars = max(1, chunk_tokens * 4)
     if len(text) <= step_chars:
         return [text]
@@ -127,6 +134,7 @@ def call_completion(system_prompt: str, user_content: str, *,
                     temperature: float = 0.1, tag: str = "llm",
                     parse_json: bool = True,
                     disable_thinking: bool = DISABLE_THINKING):
+    """Call the configured model, retry failures, and optionally parse JSON output."""
     payload = {
         "model": model,
         "messages": [

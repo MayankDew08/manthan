@@ -1,12 +1,14 @@
+# Backing services for the local Manthan stack. FastAPI depends on Neo4j and
+# Qdrant at startup; the Telegram workflow also depends on Redis being present.
 services:
   neo4j:
     image: neo4j:5.21-community
     container_name: manthan-neo4j
     ports:
-      - "127.0.0.1:7474:7474"
-      - "127.0.0.1:7687:7687"
+      - "127.0.0.1:7475:7474"
+      - "127.0.0.1:7688:7687"
     environment:
-      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in python-ingestion/.env}"
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env}"
     volumes:
       - neo4j_data:/data
 

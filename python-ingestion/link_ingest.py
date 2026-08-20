@@ -1,3 +1,5 @@
+"""Resolve manual-paste link requests stored in ``ask_user_links.json``."""
+
 import datetime as dt
 import sys
 from pathlib import Path
@@ -20,6 +22,7 @@ def _pending() -> list:
 
 
 def list_ask_user() -> None:
+    """Print unresolved links with stable indexes for the ingest command."""
     pending = _pending()
     if not pending:
         print("No unresolved ask-user links.")
@@ -35,6 +38,7 @@ def list_ask_user() -> None:
 
 
 def ingest(index: int, file_path: str = None) -> None:
+    """Summarize pasted/file content and mark the selected request resolved."""
     items = load_list(ASK_USER_FILE)
     pending = sorted([i for i in items if not i.get("resolved")],
                      key=lambda x: x.get("sent_at", ""))

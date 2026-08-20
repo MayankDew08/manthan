@@ -1,9 +1,12 @@
+"""Backfill missing Neo4j link titles with stable URL-derived labels."""
+
 from dotenv import load_dotenv
 
 from store import KnowledgeStore, _url_to_title
 
 
 def main():
+    """Update every title-less link and report the affected URLs."""
     load_dotenv()
     store = KnowledgeStore()
     updated = []

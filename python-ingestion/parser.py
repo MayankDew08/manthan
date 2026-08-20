@@ -1,9 +1,12 @@
+"""Parse WhatsApp-style exported chat text into structured message records."""
+
 from dataclasses import dataclass
 import datetime
 import re
 
 @dataclass
 class Data:
+    """Single parsed chat message before grading and enrichment."""
     datetime_iso : str
     sender : str
     text : str
@@ -18,6 +21,7 @@ TIME_FORMATS = ("%I:%M:%S %p", "%I:%M %p")
 
 
 def parse_datetime(date_str: str, time_str: str) -> datetime.datetime:
+    """Handle the date/time variants commonly found in chat exports."""
     time_str = time_str.replace("\u202f", " ").replace("\u00a0", " ").strip()
     for date_fmt in DATE_FORMATS:
         for time_fmt in TIME_FORMATS:
@@ -31,6 +35,7 @@ def parse_datetime(date_str: str, time_str: str) -> datetime.datetime:
 
 
 def parse_chat(file_path: str) -> list[Data]:
+    """Read a UTF-8 chat export and preserve multiline message bodies."""
     messages = []
     with open(file_path, "r", encoding="utf-8") as file:
         for line in file:

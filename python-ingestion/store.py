@@ -1,3 +1,5 @@
+"""Persist messages, links, entities, and topics in the Neo4j knowledge graph."""
+
 import os
 from urllib.parse import urlparse
 
@@ -13,6 +15,7 @@ _URL_NOISE_SEGMENTS = {
 
 
 def _url_to_title(url: str) -> str:
+    """Derive a stable fallback title from a URL rather than page metadata."""
     host = urlparse(url).netloc.lower()
     host = host.removeprefix("www.").split(":")[0]
     path = urlparse(url).path.strip("/")
@@ -25,6 +28,8 @@ def _url_to_title(url: str) -> str:
 
 
 class KnowledgeStore:
+    """Neo4j gateway for Manthan's message-and-link graph schema."""
+
     def __init__(self, uri=None, user=None, password=None):
         self.driver = GraphDatabase.driver(
             uri or os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
@@ -133,6 +138,7 @@ class KnowledgeStore:
         )
 
     def add_pending_link(self, record: dict):
+        """Mark a link as awaiting manually pasted content."""
         with self.driver.session() as session:
             session.execute_write(self._add_pending_link_tx, record)
 
@@ -158,6 +164,7 @@ class KnowledgeStore:
         )
 
     def pending_links(self) -> list:
+        """Return unresolved manual-paste links in chronological order."""
         with self.driver.session() as session:
             rows = session.run(
                 """

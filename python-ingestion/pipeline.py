@@ -1,3 +1,5 @@
+"""Persist enriched artifacts into Neo4j and Qdrant after local processing."""
+
 from typing import List, Optional
 
 import enrich
@@ -14,6 +16,7 @@ MIN_QUALITY = 4
 
 
 def _link_has_content(link: dict) -> bool:
+    """Only vectorize links that have enough extracted text to search later."""
     return any((link.get(k) or "").strip()
                for k in ("summary", "what_it_is", "problem_solved", "raw_text"))
 
@@ -21,6 +24,7 @@ def _link_has_content(link: dict) -> bool:
 def push_to_stores(enriched: List[dict], scraped: List[dict],
                    ask_user: Optional[List[dict]] = None,
                    min_quality: int = MIN_QUALITY) -> dict:
+    """Write graded messages, scraped links, and pending links into backing stores."""
     load_dotenv()
     store = KnowledgeStore()
     vs = VectorStore()
@@ -64,6 +68,7 @@ def push_to_stores(enriched: List[dict], scraped: List[dict],
 def run_full_ingest(chat_path: str, *, force: bool = False,
                     no_scrape: bool = False,
                     min_quality: int = MIN_QUALITY) -> dict:
+    """Run file enrichment first, then push the generated artifacts into storage."""
     enrich.enrich_chat(chat_path, min_quality=min_quality,
                        force=force, no_scrape=no_scrape)
     enriched = load_list(ENRICHED_FILE)

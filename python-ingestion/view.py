@@ -1,3 +1,5 @@
+"""Inspect local Neo4j and Qdrant contents from the command line."""
+
 from dotenv import load_dotenv
 
 from store import KnowledgeStore
@@ -10,6 +12,7 @@ def _short(value, limit=80):
 
 
 def inspect_neo4j():
+    """Print graph counts, sample nodes, and message-link connectivity."""
     store = KnowledgeStore()
     with store.driver.session() as session:
         counts = session.run(
@@ -46,6 +49,7 @@ def inspect_neo4j():
 
 
 def inspect_qdrant():
+    """Print collection metadata and sample vector payloads."""
     vs = VectorStore()
     vs.ensure_collection()
     info = vs.client.get_collection(vs.collection)

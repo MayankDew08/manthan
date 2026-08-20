@@ -1,3 +1,5 @@
+"""Retrieve generic web, GitHub, X, and YouTube link content for enrichment."""
+
 import os
 import re
 import time
@@ -35,6 +37,8 @@ GITHUB_RAW_TEXT_LIMIT = 2_000_000
 
 @dataclass
 class ScrapeResult:
+    """Captured link content or a reason automated retrieval could not complete."""
+
     url: str
     status: str = "scraped"
     block_reason: Optional[str] = None
@@ -45,6 +49,8 @@ class ScrapeResult:
 
 
 class LinkScraper:
+    """Dispatch links to source-specific scrapers with browser fallback."""
+
     def __init__(self, headless: bool = True, delay: float = 1.5,
                  max_expand_clicks: int = MAX_EXPAND_CLICKS,
                  timeout_ms: int = 25000, max_html_bytes: int = 5_000_000):
@@ -81,6 +87,7 @@ class LinkScraper:
             self._pw = None
 
     def scrape(self, url: str) -> ScrapeResult:
+        """Select a source-specific strategy and return a normalized outcome."""
         gh = parse_github_url(url)
         if gh is not None and gh.kind in ("repo", "tree", "blob", "raw"):
             return self._scrape_github(url)
@@ -100,6 +107,7 @@ class LinkScraper:
     # ------------------------------------------------------------ web
 
     def _scrape_web(self, url: str) -> ScrapeResult:
+        """Render a page, expand content, extract text, and classify access blocks."""
         self.start()
         context = self._browser.new_context(user_agent=UA, locale="en-US")
         page = context.new_page()

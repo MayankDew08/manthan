@@ -1,3 +1,4 @@
+// Package main implements Manthan's Telegram-to-Redis bridge.
 package main
 
 import (
@@ -9,6 +10,7 @@ import (
 	"strings"
 )
 
+// Config contains the runtime dependencies needed by the polling bridge.
 type Config struct {
 	BotToken  string
 	RedisAddr string
@@ -44,6 +46,7 @@ func main() {
 }
 
 func mustGetEnv(key string) string {
+	// Fail fast at startup so the bridge never polls Telegram half-configured.
 	value := os.Getenv(key)
 
 	if value == "" {
@@ -65,6 +68,7 @@ func mustGetInt64(key string) int64 {
 }
 
 func loadEnv(path string) {
+	// Local .env loading keeps "go run ." ergonomic without overriding real env vars.
 	file, err := os.Open(path)
 	if err != nil {
 		return

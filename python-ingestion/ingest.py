@@ -1,3 +1,5 @@
+"""Load generated artifacts and persist them to Neo4j and Qdrant."""
+
 from dotenv import load_dotenv
 
 from models import load_list
@@ -6,6 +8,7 @@ from pipeline import push_to_stores
 
 
 def main():
+    """Persist the current artifact files and print storage counts."""
     load_dotenv()
     enriched = load_list(ENRICHED_FILE)
     scraped = load_list(SCRAPED_FILE)

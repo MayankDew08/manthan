@@ -1,3 +1,10 @@
+"""Run the checkpointed LangGraph ingestion pipeline for a chat export.
+
+The graph overlaps pass-two grading with link scraping, then persists the
+resulting JSON artifacts. ``enrich.py`` also exposes the same core processing
+for callers that do not need LangGraph checkpointing.
+"""
+
 import hashlib
 import os
 import sys
@@ -14,8 +21,8 @@ import enrich
 import llm
 import metrics
 
-from store import KnowledgeStore  # Neo4j writer
-from vector_store import VectorStore  # Qdrant writer + embedder
+from store import KnowledgeStore
+from vector_store import VectorStore
 
 CHAT_PATH = os.environ.get("MANTHAN_CHAT_PATH", "tests/test_chat.txt")
 CHECKPOINT_DB = os.environ.get("MANTHAN_CHECKPOINT_DB", "state.sqlite")
@@ -26,6 +33,8 @@ vs = VectorStore()
 
 
 class ChatState(TypedDict, total=False):
+    """Values accumulated as a chat moves through the ingestion graph."""
+
     chat_path: str
     kept: list
     discarded: list
@@ -42,6 +51,7 @@ class ChatState(TypedDict, total=False):
 
 
 def parse_node(state):
+    """Parse the export and remove records rejected by cheap heuristics."""
     messages = parse_chat(state["chat_path"])
     kept, discarded = heuristic_filter(messages)
     reasons = {}
@@ -56,6 +66,7 @@ def parse_node(state):
 
 
 def grade_pass1_node(state):
+    """Assign initial quality scores and metadata to retained messages."""
     graded = grade_messages(state["kept"])
     print("\n--- graded: pass 1 ---")
     for msg in graded:
@@ -64,6 +75,7 @@ def grade_pass1_node(state):
 
 
 def grade_pass2_node(state):
+    """Recheck borderline pass-one messages using neighboring context."""
     verified = grade_pass2(state["graded"])
     print("\n--- graded: pass 2 (re-graded quality=3 only) ---")
     for msg in verified:
@@ -72,6 +84,7 @@ def grade_pass2_node(state):
 
 
 def scrape_candidates_node(state):
+    """Scrape high-quality pass-one candidates while pass two runs in parallel."""
     kept, graded = state["kept"], state["graded"]
     candidates = [(d, g) for d, g in zip(kept, graded)
                   if g.quality >= enrich.DEFAULT_MIN_QUALITY]
@@ -83,6 +96,7 @@ def scrape_candidates_node(state):
 
 
 def merge_node(state):
+    """Merge verified grades and identify newly promoted scrape candidates."""
     final = enrich._merge_pass2(state["graded"], state["verified"])
     promoted = [(d, g) for d, g, p1 in zip(state["kept"], final, state["graded"])
                 if p1.quality == 3 and g.quality >= enrich.DEFAULT_MIN_QUALITY]
@@ -95,6 +109,7 @@ def merge_node(state):
 
 
 def scrape_promoted_node(state):
+    """Scrape messages promoted above the threshold by pass two."""
     if not state.get("promoted"):
         return {}
     enriched, scraped, blocked, ask_user, stats, seen = enrich.process_candidates(
@@ -108,6 +123,7 @@ def scrape_promoted_node(state):
 
 
 def persist_node(state):
+    """Write final grades and link artifacts after both graph branches converge."""
     preview_backfill_keys = {
         (record.get("sent_at"), record.get("sender"), record.get("original_text"))
         for record in state["enriched"]
@@ -142,6 +158,7 @@ def persist_node(state):
 
 
 def build_graph(checkpointer=None):
+    """Build the ingestion DAG, including its parallel grading/scraping branch."""
     graph = StateGraph(ChatState)
     graph.add_node("parse", parse_node)
     graph.add_node("grade_pass1", grade_pass1_node)
@@ -163,6 +180,7 @@ def build_graph(checkpointer=None):
 
 
 def run_pipeline(chat_path: str) -> dict:
+    """Run or resume a chat-specific graph using a stable checkpoint thread ID."""
     thread = "manthan-" + hashlib.sha1(chat_path.encode("utf-8")).hexdigest()[:16]
     config = {"configurable": {"thread_id": thread}}
     with SqliteSaver.from_conn_string(CHECKPOINT_DB) as saver:

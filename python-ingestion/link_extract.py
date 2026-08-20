@@ -1,3 +1,5 @@
+"""Detect and classify URLs before link scraping and enrichment."""
+
 import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -10,6 +12,8 @@ _YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
 
 @dataclass
 class GithubRef:
+    """Parsed GitHub resource type and its repository coordinates."""
+
     kind: str
     owner: str = ""
     repo: str = ""
@@ -32,6 +36,7 @@ def is_x(url: str) -> bool:
 
 
 def parse_github_url(url: str) -> Optional[GithubRef]:
+    """Classify supported GitHub URL shapes, returning ``other`` when unknown."""
     if not is_github(url):
         return None
     parsed = urlparse(url)
@@ -75,6 +80,7 @@ def _clean_url(url: str) -> str:
 
 
 def extract_links(text: str) -> List[str]:
+    """Return unique HTTP(S) URLs in order, trimming sentence punctuation."""
     if not text:
         return []
     out = []
@@ -95,6 +101,7 @@ def is_youtube(url: str) -> bool:
 
 
 def youtube_video_id(url: str) -> Optional[str]:
+    """Extract a validated video ID from common YouTube URL forms."""
     if not is_youtube(url):
         return None
     parsed = urlparse(url)

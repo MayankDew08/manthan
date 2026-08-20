@@ -1,3 +1,5 @@
+"""FastAPI surface for search, ingestion, and Telegram worker callbacks."""
+
 import logging
 import os
 import threading
@@ -38,6 +40,7 @@ JOBS_LOCK = threading.Lock()
 
 
 def _new_job(chat_path: str) -> str:
+    """Register an in-memory background ingestion job and return its ID."""
     job_id = uuid.uuid4().hex[:12]
     with JOBS_LOCK:
         JOBS[job_id] = {
@@ -53,6 +56,7 @@ def _new_job(chat_path: str) -> str:
 
 
 def _set_job(job_id: str, **kw) -> None:
+    """Apply partial status updates under the shared job lock."""
     with JOBS_LOCK:
         JOBS[job_id].update(kw)
 
@@ -90,6 +94,7 @@ class PasteRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Open long-lived Neo4j/Qdrant clients for the API process."""
     app.state.store = KnowledgeStore()
     app.state.vs = VectorStore()
     app.state.vs.ensure_collection()
@@ -109,6 +114,7 @@ def health():
 
 @app.post("/search")
 def do_search(req: SearchRequest):
+    """Run hybrid search with optional topic and quality filters."""
     t0 = time.monotonic()
     try:
         results = search(req.query, topics=req.topics, min_quality=req.min_quality,
@@ -124,6 +130,7 @@ def do_search(req: SearchRequest):
 
 def _run_ingest_job(job_id: str, chat_path: str, force: bool,
                     no_scrape: bool, min_quality: int) -> None:
+    """Execute a full file ingestion outside the request thread."""
     try:
         summary = pipeline.run_full_ingest(chat_path, force=force,
                                            no_scrape=no_scrape,
@@ -142,6 +149,7 @@ def _run_ingest_job(job_id: str, chat_path: str, force: bool,
 
 @app.post("/ingest", status_code=202)
 def start_ingest(req: IngestRequest, bg: BackgroundTasks):
+    """Queue a chat export for background ingestion."""
     if not os.path.exists(req.chat_path):
         raise HTTPException(status_code=404,
                             detail=f"chat file not found: {req.chat_path}")
@@ -153,6 +161,7 @@ def start_ingest(req: IngestRequest, bg: BackgroundTasks):
 
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):
+    """Return the latest status for an in-memory ingestion job."""
     with JOBS_LOCK:
         job = JOBS.get(job_id)
     if job is None:
@@ -162,6 +171,7 @@ def get_job(job_id: str):
 
 @app.post("/ingest-message")
 def ingest_message(req: IngestMessageRequest):
+    """Store one message and vectorize it when it passes the quality threshold."""
     text = req.text.strip()
     if not text:
         raise HTTPException(status_code=422, detail="text is required")
@@ -222,12 +232,14 @@ def ingest_message(req: IngestMessageRequest):
 
 @app.get("/links/pending")
 def pending_links():
+    """List links that still need a manual pasted-content fallback."""
     PENDING_QUERIES.inc()
     rows = app.state.store.pending_links()
     return {"count": len(rows), "links": rows}
 
 
 def _existing_title(url: str) -> str:
+    """Reuse an existing title when a pending link is completed later."""
     with app.state.store.driver.session() as session:
         row = session.run(
             "MATCH (l:Link {url: $url}) RETURN l.title AS title",
@@ -238,6 +250,7 @@ def _existing_title(url: str) -> str:
 
 @app.post("/links/paste")
 def paste_link(req: PasteRequest):
+    """Summarize pasted content for a blocked link and persist the result."""
     url = req.url.strip()
     content = req.content.strip()
     if not url or not content:
@@ -288,6 +301,7 @@ def paste_link(req: PasteRequest):
 def _query_messages(*, sender: Optional[str], topic: Optional[str],
                     entity: Optional[str], since: Optional[str],
                     min_quality: Optional[int], limit: int) -> list:
+    """Read message records from Neo4j with lightweight graph filters."""
     where = []
     params = {}
     if sender:
@@ -344,6 +358,7 @@ def list_messages(sender: Optional[str] = None, topic: Optional[str] = None,
                   entity: Optional[str] = None, since: Optional[str] = None,
                   min_quality: Optional[int] = Query(default=None, ge=0, le=10),
                   limit: int = Query(default=50, ge=1, le=500)):
+    """Expose stored messages for debugging and local inspection."""
     MESSAGES_QUERIES.inc()
     rows = _query_messages(sender=sender, topic=topic, entity=entity,
                            since=since, min_quality=min_quality, limit=limit)
@@ -352,4 +367,5 @@ def list_messages(sender: Optional[str] = None, topic: Optional[str] = None,
 
 @app.get("/metrics")
 def prometheus_metrics():
+    """Expose Prometheus metrics for the local deployment."""
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)

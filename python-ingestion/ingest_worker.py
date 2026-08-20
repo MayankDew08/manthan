@@ -1,3 +1,5 @@
+"""Consume ingest jobs from Redis, call the API, and reply on Telegram."""
+
 import json
 from pathlib import Path
 
@@ -24,6 +26,7 @@ r = redis.Redis(
 
 
 def ensure_group():
+    """Create the Redis consumer group once and tolerate repeat starts."""
     try:
         r.xgroup_create(
             STREAM,
@@ -37,6 +40,7 @@ def ensure_group():
 
 
 def send_telegram_message(chat_id: int, text: str):
+    """Send the worker result back to the originating Telegram chat."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
     response = requests.post(
@@ -52,6 +56,7 @@ def send_telegram_message(chat_id: int, text: str):
 
 
 def call_ingest_api(payload: dict) -> dict:
+    """Forward one queued ingest job to the FastAPI endpoint."""
     response = requests.post(
         URL,
         json={
@@ -72,6 +77,7 @@ def call_ingest_api(payload: dict) -> dict:
 
 
 def format_ingest_reply(result: dict) -> str:
+    """Keep Telegram replies compact while surfacing the extracted metadata."""
     msg = result.get("message", {})
     return (
         "Stored successfully\n"
@@ -82,6 +88,7 @@ def format_ingest_reply(result: dict) -> str:
 
 
 def main():
+    """Block on the ingest stream and acknowledge jobs only after replying."""
     ensure_group()
 
     print("Ingest worker started")

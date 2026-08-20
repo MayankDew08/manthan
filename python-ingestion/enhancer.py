@@ -1,3 +1,5 @@
+"""Apply LLM-based metadata extraction and summaries to messages and links."""
+
 from typing import List, Optional
 
 import llm
@@ -14,6 +16,7 @@ STRICT_RETRY_NOTE = (
 
 
 def _first(data, *, system_prompt, user, tag, max_tokens, fallback=None) -> dict:
+    """Return the first JSON object, retrying once with stricter instructions."""
     if data:
         return data[0]
     print(f"[{tag}] LLM returned no JSON objects; retrying with strict instruction")
@@ -45,6 +48,7 @@ def _dedupe(items: List[str]) -> List[str]:
 
 
 def _normalize_summary(item: dict) -> dict:
+    """Normalize a web summary into the persisted link-summary schema."""
     return {
         "summary": (item.get("summary") or "").strip(),
         "what_it_is": (item.get("what_it_is") or "").strip(),
@@ -56,6 +60,7 @@ def _normalize_summary(item: dict) -> dict:
 
 
 def enrich_message(original_text: str, link_urls: List[str] = None) -> dict:
+    """Extract link intent, entities, and topics from one chat message."""
     system_prompt = llm.load_system_prompt(MESSAGE_PROMPT)
     parts = [f"Original message:\n{original_text}"]
     if link_urls:
@@ -76,6 +81,7 @@ def enrich_message(original_text: str, link_urls: List[str] = None) -> dict:
 
 
 def summarize_content(url: str, title: str, raw_text: str) -> dict:
+    """Summarize web content directly or with map-reduce when it is oversized."""
     system_prompt = llm.load_system_prompt(SUMMARY_PROMPT)
     budget = llm.budget_for(system_prompt)
     if llm.estimate_tokens(raw_text) <= budget:
@@ -98,6 +104,7 @@ def _summary_user(url: str, title: str, raw_text: str) -> str:
 
 def _map_reduce_summary(system_prompt: str, url: str, title: str,
                         raw_text: str, budget: int) -> dict:
+    """Summarize chunks independently and merge their structured key points."""
     chunk_tokens = min(llm.HARD_CHUNK_TOKENS, budget)
     parts = llm.split_text(raw_text, chunk_tokens)
     print(f"[summarizer] content too large, splitting into {len(parts)} parts")
@@ -136,6 +143,7 @@ def _map_reduce_summary(system_prompt: str, url: str, title: str,
 
 
 def summarize_repo(url: str, title: str, raw_text: str) -> dict:
+    """Build a practitioner-oriented repository overview from captured context."""
     system_prompt = llm.load_system_prompt(REPO_PROMPT)
     budget = llm.budget_for(system_prompt)
     if llm.estimate_tokens(raw_text) <= budget:
@@ -157,6 +165,7 @@ def _repo_user(url: str, title: str, raw_text: str) -> str:
 
 
 def _normalize_repo(item: dict) -> dict:
+    """Normalize a repository overview into the persisted summary schema."""
     return {
         "summary": (item.get("summary") or "").strip(),
         "what_it_is": (item.get("what_it_is") or "").strip(),
@@ -169,6 +178,7 @@ def _normalize_repo(item: dict) -> dict:
 
 def _map_reduce_repo(system_prompt: str, url: str, title: str,
                      raw_text: str, budget: int) -> dict:
+    """Summarize README chunks and merge them into one repository overview."""
     chunk_tokens = min(llm.HARD_CHUNK_TOKENS, budget)
     parts = llm.split_text(raw_text, chunk_tokens)
     print(f"[repo] content too large, splitting into {len(parts)} parts")

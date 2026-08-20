@@ -7,6 +7,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+// runPolling converts Telegram updates into the smaller internal routing model.
 func runPolling(ctx context.Context, BotToken string, queue *Queue) error {
 	bot, err := tgbotapi.NewBotAPI(BotToken)
 	if err != nil {

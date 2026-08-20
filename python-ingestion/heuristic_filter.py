@@ -1,14 +1,13 @@
+"""Remove obvious low-signal chat records before expensive LLM grading."""
+
 import re
 from dataclasses import dataclass
 from typing import List, Tuple, Dict
-from parser import Data  # your existing dataclass
+from parser import Data
 
 
 def heuristic_filter(messages: List[Data]) -> Tuple[List[Data], List[Dict]]:
-    """
-    Ultra-light filter. Only drops the obvious zero-value messages.
-    Everything else passes to the LLM grader.
-    """
+    """Return retained messages plus structured reasons for obvious discards."""
     kept = []
     discarded = []
     

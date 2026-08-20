@@ -1,3 +1,5 @@
+"""Orchestrate grading, link scraping, summarization, and artifact generation."""
+
 import argparse
 import datetime as dt
 import json
@@ -50,6 +52,7 @@ def _already_seen() -> set:
 
 
 def _grade(chat_path: str):
+    """Parse, filter, grade twice, and save the final ordered grade records."""
     messages = parse_chat(chat_path)
     kept, discarded = heuristic_filter(messages)
     print(f"[enrich] parsed {len(messages)} messages, kept {len(kept)} after heuristic filter")
@@ -61,6 +64,7 @@ def _grade(chat_path: str):
 
 
 def _link_preview_index(scraped, blocked, ask_user):
+    """Normalize all link outcomes into previews embedded in message records."""
     previews = {}
     for record in ask_user:
         url = record.get("url")
@@ -100,6 +104,7 @@ def _link_preview_index(scraped, blocked, ask_user):
 
 
 def _attach_link_previews(enriched, scraped, blocked, ask_user, current_keys):
+    """Attach current previews without rewriting historical message snapshots."""
     previews = _link_preview_index(scraped, blocked, ask_user)
     return [
         {
@@ -146,7 +151,7 @@ def _load_required_list(path: str) -> list:
 
 
 def refresh_summaries(max_workers: int = MAX_WORKERS) -> None:
-    """Regenerate summaries from saved raw text; never grade or fetch URLs."""
+    """Rewrite scraped and enriched summaries from saved text without fetching."""
     scraped = _load_required_list(SCRAPED_FILE)
     enriched = _load_required_list(ENRICHED_FILE)
     if not scraped:
@@ -202,6 +207,13 @@ def _load_existing_grades(chat_path: str):
 def process_candidates(candidates, *, force: bool = False, no_scrape: bool = False,
                        max_workers: int = MAX_WORKERS, seen=None, scraped=None,
                        blocked=None, enriched=None, ask_user=None):
+    """Enrich candidates and merge their outcomes into cumulative artifacts.
+
+    Existing URLs are skipped unless ``force`` is true. ``no_scrape`` still
+    enriches message metadata but leaves link retrieval untouched. The return
+    value contains enriched messages, each link outcome list, counters, and the
+    updated set of seen URLs.
+    """
     if seen is None:
         seen = set() if force else _already_seen()
     else:
@@ -282,6 +294,7 @@ def process_candidates(candidates, *, force: bool = False, no_scrape: bool = Fal
 
 
 def _scrape_chunk(chunk):
+    """Scrape one chunk with a thread-local browser and classify each outcome."""
     scraper = LinkScraper()
     out = []
     try:
@@ -325,6 +338,7 @@ def enrich_chat(chat_path: str, min_quality: int = DEFAULT_MIN_QUALITY,
                 force: bool = False, no_scrape: bool = False,
                 max_workers: int = MAX_WORKERS,
                 scrape_only: bool = False) -> None:
+    """Run the artifact pipeline, optionally reusing existing message grades."""
     kept, final = (_load_existing_grades(chat_path) if scrape_only
                    else _grade(chat_path))
     candidates = [(d, g) for d, g in zip(kept, final) if g.quality >= min_quality]

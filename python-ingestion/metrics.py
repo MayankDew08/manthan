@@ -1,3 +1,5 @@
+"""Record process-local ingestion and LLM metrics for the latest run."""
+
 import datetime as dt
 import json
 import os
@@ -14,6 +16,7 @@ def _now() -> str:
 
 
 def write_last_run(**extra) -> dict:
+    """Snapshot LLM counters plus caller-provided pipeline statistics."""
     data = {
         "generated_at": _now(),
         "llm": {
@@ -34,6 +37,7 @@ def write_last_run(**extra) -> dict:
 
 
 def load_last_run() -> dict:
+    """Load the last snapshot, returning an empty mapping when unavailable."""
     try:
         with open(LAST_RUN_FILE, encoding="utf-8") as f:
             return json.load(f)
