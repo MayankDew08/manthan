@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><title>Read More Fixture</title></head>
+<body>
+<h1>Read More Fixture</h1>
+<p>This is the intro paragraph visible before expanding. It mentions vector databases and RAG.</p>
+<div id="hidden" style="display:none">
+<p>The hidden section discusses LangGraph state management and explains how graph nodes beyond twenty cause state sync overhead.</p>
+<p>Teams migrated from Pinecone to Qdrant and observed recall dropping eight percent while p99 latency fell from one hundred twenty milliseconds to twelve milliseconds.</p>
+<p>CUDA 12.1 caused OutOfMemoryError issues with the 27b dense model until the KV cache was quantized to q8_0.</p>
+<p>Flash attention on a 3060 reached fifty tokens per second while the 35b MoE stalled in thinking loops.</p>
+<p>The session memory directory and the router AGENTS.md were the two highest leverage pieces of the whole agentic setup.</p>
+<p>Test-first scaffolding means every skill writes a failing test before it edits any code, and the test stays as a regression guard.</p>
+<p>Context budget discipline uses a dump and continue protocol so the agent writes a state file and cold starts from it.</p>
+<p>Session logging makes debugging possible because you cannot debug what you cannot replay.</p>
+<p>Prompt caching saved roughly thirty percent of latency across the batch grading pipeline.</p>
+<p>Prompt cache lines reuse evaluated system prompt tokens across repeated calls.</p>
+</div>
+<button id="readmore">Read more</button>
+<script>
+document.getElementById('readmore').addEventListener('click', function () {
+  document.getElementById('hidden').style.display = 'block';
+});
+</script>
+</body>
+</html>

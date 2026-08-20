@@ -1,0 +1,25 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+
+# Runtime checkpoints and message-derived artifacts may contain private data.
+*.sqlite*
+grading_checkpoint.json
+graded_messages.json
+scraped_links.json
+blocked_links.json
+ask_user_links.json
+enriched_messages.json
+state.json
+discarded_log.json
+evals/
+
+# Metrics / Reports
+metrics/*.md
+!metrics/manthan_report.md
+!metrics/synthetic_report.md
+metrics/last_run.json
+
+# Data Files
+data/*.txt

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head><title>Alibaba Qwen on X</title></head>
+<body>
+<div data-testid="cellInnerDiv">
+  <article data-testid="tweet" tabindex="-1">
+    <div data-testid="tweetText">
+      <span>Qwen3 releases our new reasoning model today. The teaser text visible before expanding says it focuses on efficient local inference and open weights for everyone.</span>
+      <div><button aria-label="Show more">Show more</button></div>
+      <span class="full" style="display:none">The full announcement continues with the details: the model supports a 256k context window, tool calling, and structured output. Benchmarks show it matches larger closed models on math and code tasks while running fully on consumer hardware. We ship quantized checkpoints for 8GB and 16GB cards, plus a llama.cpp integration with flash attention and prompt caching enabled by default. The open weights are available now under the Apache 2.0 license, with fine-tuning recipes, evaluation harnesses, and an official Docker image for self-hosting. You can also try the hosted playground on Qwen Chat, and the API is available for developers who prefer a managed service.</span>
+    </div>
+  </article>
+  <article data-testid="tweet">
+    <div data-testid="tweetText"><span>Reply from another user that must be excluded because we only keep the first post.</span></div>
+  </article>
+</div>
+<script>
+document.querySelector('button[aria-label="Show more"]').addEventListener('click', function (e) {
+  document.querySelector('.full').style.display = 'inline';
+  e.currentTarget.remove();
+});
+</script>
+</body>
+</html>

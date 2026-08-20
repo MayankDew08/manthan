@@ -1,0 +1,58 @@
+14/08/2026, 10:30:15 AM Alice: Hey everyone, check this out
+14/08/2026, 10:30:22 AM Bob: What is it?
+14/08/2026, 10:31:05 AM Alice: It's a new vector DB I found
+Pretty interesting for our use case
+Because the indexing is way faster
+14/08/2026, 10:31:40 AM Bob: Nice, will look into it
+14/08/2026, 10:32:10 AM Charlie: lol
+14/08/2026, 10:32:15 AM Dave: 👍
+14/08/2026, 10:33:00 AM Alice: Good morning everyone
+14/08/2026, 10:33:30 AM Bob: Good morning, found this great article on RAG pipelines
+14/08/2026, 10:34:00 AM Charlie: ok
+14/08/2026, 10:34:05 AM Dave: okay
+14/08/2026, 10:34:10 AM Alice: thanks
+14/08/2026, 10:34:15 AM Bob: thank you
+14/08/2026, 10:35:00 PM Alice: Also this link https://example.com/article
+14/08/2026, 10:36:00 PM Charlie: <Media omitted>
+14/08/2026, 10:36:30 PM Dave: Check this out
+<Media omitted>
+14/08/2026, 10:37:00 PM Alice: What time is the call?
+14/08/2026, 10:37:30 PM Bob: link?
+14/08/2026, 10:38:00 PM Charlie: 5 mins?
+14/08/2026, 10:38:30 PM Dave: see you there
+14/08/2026, 10:39:00 PM Alice: We moved from Pinecone to Qdrant last quarter. Recall dropped ~8% but p99 latency went from 120ms to 12ms. Would only recommend if your use case is read-heavy.
+14/08/2026, 10:40:00 PM Bob: Has anyone used LangGraph for agent orchestration at scale? Hitting dead ends with state management when the graph exceeds ~20 nodes.
+14/08/2026, 10:41:00 PM Charlie: same
+14/08/2026, 10:41:30 PM Dave: true
+14/08/2026, 10:42:00 PM Alice: Makes sense
+14/08/2026, 10:42:30 PM Bob: Agreed
+14/08/2026, 10:43:00 PM Charlie: Hi I am Charlie, built vector indexes at Pinecone for 3 years, now exploring local-first AI stacks. Happy to share war stories on embedding optimization.
+14/08/2026, 10:44:00 PM Dave: Welcome to the group!
+14/08/2026, 10:45:00 PM Alice: For local LLMs, llama3.1:8b is the sweet spot for entity extraction on consumer hardware. We benchmarked phi3, mistral, and llama variants.
+14/08/2026, 10:46:00 PM Bob: ...
+14/08/2026, 10:47:00 PM Charlie: !!!
+14/08/2026, 10:48:00 PM Dave: 
+14/08/2026, 10:49:00 PM Alice: lol we tried that too, had the same issue with CUDA 12.1
+14/08/2026, 10:50:00 PM Alice: Full agentic setup dump from that twitter thread, some real good basics in here. I'm just going to dump my whole agentic coding setup because I keep seeing people miss giant chunks of it and it's actively hurting their results. Here is what I have and recommend:
+0. An AGENTS.md that acts as a router. It sends the agent to the right skills, docs, and context files before it does anything else. Without this the agent wanders into the wrong folders and guesses instead of reading.
+1. A skills directory, one folder per capability. Each folder has a SKILL.md with a precise trigger description and the workflow steps. Keep the triggers narrow, one skill per concern, and never let two skills claim the same trigger.
+2. Explicit tool definitions in a separate tools.md including the failure modes. Agents fail because they don't know what breaks, so I document the sharp edges: which flags explode, which commands need root, which APIs rate limit.
+3. A memory directory with markdown notes the agent writes after every session: what worked, what failed, and what to try next. This compounds over time and is honestly the highest leverage part of the whole setup.
+4. Model choice matters more than prompt length. For local inference I started with a 35b MoE at around 90 tokens per second but it got stuck in thinking loops, adding imports, removing them, re-adding them, never converging. I switched to a 27b dense model at about 50 tok/s and it can run Flutter analyze, interpret the linter warnings, and self-correct in one pass. Raw throughput is not the same as getting the task done.
+5. Context budget discipline. I give the agent a hard token budget per session and a dump-and-continue protocol. When it hits the budget it writes a state file and cold-starts with that file as the entry point instead of trying to remember.
+6. Test-first scaffolding. Every skill writes a small failing test before it edits any code. The test is the contract. The agent iterates until the test goes green, and then the test stays behind as a regression guard.
+7. Session logging. I log every action the agent takes to a session log. You cannot debug what you cannot replay, so after each session I grep the log for RETRY, LOOP, and FAILED to find the weak spots.
+The biggest wins I have seen in practice are the router file, the session memory, and forcing the agent to write the failing test first. Everything else is polish on top of those three. Happy to answer follow-ups on any of it.
+14/08/2026, 10:51:00 PM Charlie: That is a solid setup, saving this for later
+14/08/2026, 10:52:00 PM Bob: Here is the config I use for the 27b dense model on a 3060, took a while to get stable so sharing the working values. The key knobs are the KV cache quantization and the prompt cache. If you leave flash attention off it drops to 25 tok/s, so do not. Temperature 0.2, top_p 0.9, repetition penalty 1.15. Context 8192 works fine with the 4GB layer offload, above that it spills to CPU and you lose the streaming benefits.
+--model 27b-dense-q5 --ctx 8192 --threads 8 --n-gpu-layers 32 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --temp 0.2 --top-p 0.9 --repeat-penalty 1.15 --mlock
+I tested the same file with the 35b and it OOMs at 6GB VRAM unless you drop to q4 and lose quality, so the 27b dense is the better tradeoff for 8GB cards.
+14/08/2026, 10:53:00 PM Dave: What is the prompt cache line for? Never seen that flag before.
+14/08/2026, 10:54:00 PM Bob: It caches the system prompt tokens so repeated calls don't re-evaluate them, saved us about 30% on latency across the batch grading pipeline.
+14/08/2026, 10:55:00 PM Alice: Also here is the link to the full thread for anyone who wants the deeper dive: https://twitter.com/jamonholmgren/status/1234567890123456789 and the follow-up repo with all the templates https://github.com/example/agentic-starter
+14/08/2026, 10:56:00 PM Charlie: Someone on HN just dropped this, looks like the vector DB we were discussing: https://github.com/qdrant/qdrant
+14/08/2026, 10:57:00 PM Alice: This agent orchestrator looks useful for what Bob was asking about: https://www.producthunt.com/posts/agent-orchestrator
+14/08/2026, 10:58:00 PM Dave: Meeting link: https://meet.google.invalid/sample-meeting
+14/08/2026, 10:59:00 PM Bob: Alibaba Qwen just posted this on X: https://x.com/Alibaba_Qwen/status/2088280188362867185?s=20
+14/08/2026, 11:00:00 PM Charlie: The Iconiq State of AI 2026 report is out: https://www.iconiq.com/growth/reports/state-of-ai-2026
+14/08/2026, 11:01:00 PM Dave: And this GitHub project that turns your profile into a personal brand: https://github.com/nutlope/hallmark

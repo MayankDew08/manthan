@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><title>Stuck Post on X</title></head>
+<body>
+<div data-testid="cellInnerDiv">
+  <article data-testid="tweet" tabindex="-1">
+    <div data-testid="tweetText">
+      <span>This is the visible teaser only. The rest of the thread text stays collapsed because the show more button does not actually expand anything.</span>
+      <div><button aria-label="Show more">Show more</button></div>
+      <span class="full" style="display:none">The hidden full article text that must never appear because the button is broken.</span>
+    </div>
+  </article>
+</div>
+</body>
+</html>

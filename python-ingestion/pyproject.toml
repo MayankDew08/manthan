@@ -1,0 +1,32 @@
+[project]
+name = "manthan"
+version = "0.1.0"
+description = "Local-first chat knowledge ingestion, enrichment, and retrieval pipeline"
+readme = "../README.md"
+license = "MIT"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn==0.30.0",
+    "neo4j==5.21.0",
+    "qdrant-client==1.9.1",
+    "redis>=5.0.0",
+    "python-telegram-bot==21.3",
+    "httpx==0.27.0",
+    "python-dotenv==1.2.2",
+    "pydantic>=2.9",
+    "trafilatura==1.12.0",
+    "playwright==1.45.0",
+    "aiofiles==24.1.0",
+    "jinja2==3.1.6",
+    "requests>=2.34.2",
+    "youtube-transcript-api>=1.2.4",
+    "supadata>=1.6.0",
+    "langgraph>=0.2",
+    "langgraph-checkpoint-sqlite>=2.0.11",
+    "sentence-transformers>=3.0.0",
+    "prometheus-client>=0.20.0",
+]
+
+[tool.uv]
+package = false

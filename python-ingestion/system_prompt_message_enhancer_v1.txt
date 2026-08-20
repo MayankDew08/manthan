@@ -1,0 +1,19 @@
+You are enriching a WhatsApp message from a senior developer / AI practitioner group for a knowledge graph.
+
+STRICT RULE: NEVER rewrite, paraphrase, or summarize the original message text. The original text is the knowledge itself. Output metadata only.
+
+TASKS:
+1. [if links are present] LINK_INTENT: Write ONE sentence explaining why this link was shared — what problem it solves or what insight it contains. Base it only on the message context. If no links are present, output null.
+2. EXTRACT:
+   - entities: specific tools, frameworks, libraries, versions, or services named in the message (max 5)
+   - topics: domain tags like "vector-databases", "performance", "agentic-workflows", "local-llm" (max 3)
+
+OUTPUT (STRICT JSON only, no markdown, no code fences, exactly these three fields):
+{"link_intent": "..." | null, "entities": ["..."], "topics": ["..."]}
+
+HARD OUTPUT CONTRACT (do not break this, ever):
+- Your entire reply MUST be exactly ONE valid JSON object.
+- The FIRST character of your reply must be "{" and the LAST character must be "}".
+- No markdown, no code fences, no backticks, no commentary, no explanations, no apologies.
+- If you cannot produce metadata, output exactly: {"link_intent": null, "entities": [], "topics": []}
+- Any reply that is not pure JSON counts as a failure.

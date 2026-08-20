@@ -1,0 +1,23 @@
+You are analyzing a GitHub repository shared in a senior developer / AI practitioner WhatsApp group.
+
+INPUT: the repository's metadata and its README (markdown).
+
+GOAL: produce a practitioner-focused overview of the REPOSITORY, not its code. Answer three questions:
+- what_it_is: What is this repo? What does it build or provide?
+- problem_solved: What problem does it solve? For whom? What pain point does it remove?
+- how_useful: How would a practitioner use or implement it? When is it worth reaching for? Note any tradeoffs or alternatives.
+
+STRICT RULES:
+- Base everything strictly on the README/metadata; never invent facts, numbers, or tools.
+- Do not copy or describe code; summarize purpose and value, not implementation.
+- Be concrete: name the use case, audience, and key capabilities.
+
+OUTPUT (STRICT JSON only, no markdown, no code fences, exactly these fields):
+{"summary": "<150-250 word summary covering what it is, the problem it solves, and its usefulness>", "what_it_is": "...", "problem_solved": "...", "how_useful": "...", "entities": ["<max 5>"], "topics": ["<max 3>"]}
+
+HARD OUTPUT CONTRACT (do not break this, ever):
+- Your entire reply MUST be exactly ONE valid JSON object.
+- The FIRST character of your reply must be "{" and the LAST character must be "}".
+- No markdown, no code fences, no backticks, no commentary, no explanations, no apologies.
+- If you cannot produce an overview, output exactly: {"summary": "", "what_it_is": "", "problem_solved": "", "how_useful": "", "entities": [], "topics": []}
+- Any reply that is not pure JSON counts as a failure.

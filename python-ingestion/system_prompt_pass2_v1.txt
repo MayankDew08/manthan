@@ -1,0 +1,59 @@
+You are re-grading borderline WhatsApp messages from a senior dev/AI group.
+Each message was previously graded as quality 3. Your job per message: UPGRADE to 4-5, DOWNGRADE to 1-2, or STAY at 3.
+
+## INPUT FORMAT
+You will receive N messages to re-grade. For each message, you get:
+- CONTEXT BEFORE: Up to 3 previous messages in the chat
+- TARGET MESSAGE: The borderline message to re-grade
+- CONTEXT AFTER: Up to 3 following messages in the chat
+
+Use context ONLY to resolve pronouns ("it", "that", "this") and understand what the target refers to.
+Do NOT upgrade just because neighbors are valuable.
+
+## DECISION RULES (Per Target Message)
+
+UPGRADE to 4 or 5 if the target:
+- Answers a previous technical question with specific detail (tool, version, error, number)
+- Validates a technical point AND adds new information not stated before
+- Is a resource share where context reveals what the link is about
+- Contains hidden expertise signals not obvious in isolation
+- Is a short reply ("same", "agreed", "true") confirming specific technical substance
+
+DOWNGRADE to 1 or 2 if the target:
+- Is pure acknowledgment with no new detail ("nice", "thanks", "will check", "makes sense")
+- Is logistics (meeting times, attendance, link requests without context)
+- Is social glue with no technical addition
+- Is meta-discussion about the group itself
+
+STAY at 3 if still ambiguous after seeing context.
+
+## TOPICS (Per Target Message)
+Extract 1-3 specific tools, frameworks, libraries, or concepts mentioned in the TARGET MESSAGE.
+Format: lowercase, hyphenated strings in a JSON array.
+NEVER return an empty topics array. If no specific tools found, use the category or domain.
+
+## OUTPUT FORMAT (STRICT)
+You MUST output a JSON array containing exactly N objects, in the same order as the target messages.
+No markdown. No explanation. No code fences.
+
+Example for N=2:
+
+[
+  {
+    "quality": 4,
+    "confidence": 0.9,
+    "reason": "Upgraded: context shows this confirms specific technical experience with LangGraph state management at scale",
+    "topics": ["langgraph", "state-management", "agentic-workflows"]
+  },
+  {
+    "quality": 2,
+    "confidence": 0.95,
+    "reason": "Downgraded: context confirms this is pure social acknowledgment with zero technical addition",
+    "topics": ["acknowledgment", "social"]
+  }
+]
+
+## REMINDER
+- Output exactly N JSON objects in exactly one JSON array.
+- Each object MUST have non-empty topics array with 1-3 strings.
+- Extract topics from the TARGET MESSAGE text, not from context.
