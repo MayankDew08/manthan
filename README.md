@@ -51,7 +51,7 @@ These measurements describe one local run, not a benchmark across hardware or mo
 - `docker-compose.yaml`: local Neo4j, Qdrant, and Redis services
 - `python-ingestion/metrics/`: redacted public reports generated from local runs
 
-## How it fits together
+## System architecture
 
 1. `parser.py` reads an exported chat file.
 2. `heuristic_filter.py` removes obvious noise.
@@ -60,13 +60,7 @@ These measurements describe one local run, not a benchmark across hardware or mo
 5. `store.py` and `vector_store.py` write to Neo4j and Qdrant.
 6. `app.py` exposes the stored knowledge through HTTP endpoints.
 
-```text
-chat export -> filter -> local LLM grading -> link enrichment
-                                             |            |
-                                           Neo4j       Qdrant
-                                             \            /
-                                                FastAPI
-```
+![Manthan system architecture](docs/assets/system-architecture.png)
 
 ## Requirements
 
