@@ -6,6 +6,7 @@
 # Environment / Dependencies
 .env
 .venv/
+.venv.broken/
 node_modules/
 __pycache__/
 *.pyc
