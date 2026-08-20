@@ -51,6 +51,8 @@ def api_readme(url, headers, **kw):
 
 
 calls = []
+
+
 def fake_get(url, **kw):
     calls.append(url)
     if "api.github.com" in url:
@@ -66,65 +68,82 @@ def make_scraper():
     return s
 
 
-link_scraper.requests.get = fake_get
-
-s = make_scraper()
-r = s.scrape("https://github.com/qdrant/qdrant")
-check("repo scraped", r.status == "scraped", r)
-check("repo title full_name", r.title == "qdrant/qdrant", r.title)
-check("repo raw_text has metadata + README",
-      "vector similarity search" in r.raw_text and "Stars: 19000" in r.raw_text
-      and "Apache-2.0" in r.raw_text, r.raw_text[:120])
-check("repo note via api", "github readme via api" in r.notes)
-check("repo no raw.githubusercontent fetch", not any("raw.githubusercontent" in u for u in calls))
-
-
 def blocked_web(url):
     return ScrapeResult(url=url, status="blocked", block_reason="auth_required")
 
 
-# API 404 (private/deleted, no token) -> web fallback
-fake404 = lambda url, **kw: FakeResp(404)
-link_scraper.requests.get = fake404
-s = make_scraper()
-s._scrape_web = blocked_web
-r = s.scrape("https://github.com/private/secret-repo")
-check("404 falls back to web", r.status == "blocked" and r.block_reason == "auth_required", r)
-check("404 note added", any("falling back to web" in n for n in r.notes), r.notes)
+def run_all():
+    FAILS.clear()
+    calls.clear()
+    original_get = link_scraper.requests.get
+    original_start = LinkScraper.start
+    try:
+        link_scraper.requests.get = fake_get
 
-# rate-limit 403 -> web fallback
-link_scraper.requests.get = lambda url, **kw: FakeResp(
-    403, headers={"X-RateLimit-Remaining": "0"})
-s = make_scraper()
-s._scrape_web = blocked_web
-r = s.scrape("https://github.com/qdrant/qdrant")
-check("rate-limit falls back to web", r.status == "blocked", r)
+        s = make_scraper()
+        r = s.scrape("https://github.com/qdrant/qdrant")
+        check("repo scraped", r.status == "scraped", r)
+        check("repo title full_name", r.title == "qdrant/qdrant", r.title)
+        check("repo raw_text has metadata + README",
+              "vector similarity search" in r.raw_text and "Stars: 19000" in r.raw_text
+              and "Apache-2.0" in r.raw_text, r.raw_text[:120])
+        check("repo note via api", "github readme via api" in r.notes)
+        check("repo no raw.githubusercontent fetch", not any("raw.githubusercontent" in u for u in calls))
+
+        # API 404 (private/deleted, no token) -> web fallback
+        link_scraper.requests.get = lambda url, **kw: FakeResp(404)
+        s = make_scraper()
+        s._scrape_web = blocked_web
+        r = s.scrape("https://github.com/private/secret-repo")
+        check("404 falls back to web", r.status == "blocked" and r.block_reason == "auth_required", r)
+        check("404 note added", any("falling back to web" in n for n in r.notes), r.notes)
+
+        # rate-limit 403 -> web fallback
+        link_scraper.requests.get = lambda url, **kw: FakeResp(
+            403, headers={"X-RateLimit-Remaining": "0"})
+        s = make_scraper()
+        s._scrape_web = blocked_web
+        r = s.scrape("https://github.com/qdrant/qdrant")
+        check("rate-limit falls back to web", r.status == "blocked", r)
+
+        # blob link -> repo context, no raw-code fetch
+        calls.clear()
+        link_scraper.requests.get = fake_get
+        s = make_scraper()
+        r = s.scrape("https://github.com/qdrant/qdrant/blob/master/src/main.rs")
+        check("blob resolves to repo context", r.status == "scraped" and "vector similarity search" in r.raw_text)
+        check("blob notes file path", any("file: master/src/main.rs" in n for n in r.notes), r.notes)
+        check("blob did not fetch raw code", not any("raw.githubusercontent" in u for u in calls))
+
+        # issues -> web scrape
+        seen = {}
+
+        def issues_web(url):
+            seen["url"] = url
+            return ScrapeResult(url=url, status="scraped")
+
+        s = make_scraper()
+        s._scrape_web = issues_web
+        r = s.scrape("https://github.com/qdrant/qdrant/issues/123")
+        check("issues routes to web", seen.get("url", "").endswith("/issues/123"), seen)
+
+        # gist -> web scrape
+        s = make_scraper()
+        s._scrape_web = issues_web
+        r = s.scrape("https://gist.github.com/u/abc123")
+        check("gist routes to web", seen.get("url", "").startswith("https://gist.github.com"), seen)
+    finally:
+        link_scraper.requests.get = original_get
+        LinkScraper.start = original_start
+
+    print("\n" + ("RESULT: FAILED" if FAILS else "RESULT: ALL PASS"))
+    return FAILS
 
 
-# blob link -> repo context, no raw-code fetch
-calls.clear()
-link_scraper.requests.get = fake_get
-s = make_scraper()
-r = s.scrape("https://github.com/qdrant/qdrant/blob/master/src/main.rs")
-check("blob resolves to repo context", r.status == "scraped" and "vector similarity search" in r.raw_text)
-check("blob notes file path", any("file: master/src/main.rs" in n for n in r.notes), r.notes)
-check("blob did not fetch raw code", not any("raw.githubusercontent" in u for u in calls))
+def test_all():
+    fails = run_all()
+    assert not fails, f"failed checks: {fails}"
 
-# issues -> web scrape
-seen = {}
-def issues_web(url):
-    seen["url"] = url
-    return ScrapeResult(url=url, status="scraped")
-s = make_scraper()
-s._scrape_web = issues_web
-r = s.scrape("https://github.com/qdrant/qdrant/issues/123")
-check("issues routes to web", seen.get("url", "").endswith("/issues/123"), seen)
 
-# gist -> web scrape
-s = make_scraper()
-s._scrape_web = issues_web
-r = s.scrape("https://gist.github.com/u/abc123")
-check("gist routes to web", seen.get("url", "").startswith("https://gist.github.com"), seen)
-
-print("\n" + ("RESULT: FAILED" if FAILS else "RESULT: ALL PASS"))
-sys.exit(1 if FAILS else 0)
+if __name__ == "__main__":
+    sys.exit(1 if run_all() else 0)

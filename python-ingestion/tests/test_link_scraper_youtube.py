@@ -51,21 +51,32 @@ def run(vid, yt_ok, supadata_text):
         scraper.close()
 
 
-r = run("abc123", yt_ok=True, supadata_text=None)
-check("primary transcript wins", r.status == "scraped" and "official captions" in r.raw_text
-      and any("youtube-transcript-api" in n for n in r.notes), r)
+def run_all():
+    FAILS.clear()
+    r = run("abc123", yt_ok=True, supadata_text=None)
+    check("primary transcript wins", r.status == "scraped" and "official captions" in r.raw_text
+          and any("youtube-transcript-api" in n for n in r.notes), r)
 
-r = run("abc123", yt_ok=False, supadata_text="Supadata generated transcript text.")
-check("supadata fallback fires", r.status == "scraped" and "Supadata generated" in r.raw_text
-      and any("supadata" in n for n in r.notes), r)
+    r = run("abc123", yt_ok=False, supadata_text="Supadata generated transcript text.")
+    check("supadata fallback fires", r.status == "scraped" and "Supadata generated" in r.raw_text
+          and any("supadata" in n for n in r.notes), r)
 
-r = run("abc123", yt_ok=False, supadata_text=None)
-check("both fail -> blocked", r.status == "blocked" and r.block_reason == "transcript_unavailable",
-      f"{r.status} {r.block_reason}")
+    r = run("abc123", yt_ok=False, supadata_text=None)
+    check("both fail -> blocked", r.status == "blocked" and r.block_reason == "transcript_unavailable",
+          f"{r.status} {r.block_reason}")
 
-r = LinkScraper(delay=0)._scrape_youtube("https://youtube.com/watch?v=")
-check("bad url -> invalid", r.status == "blocked" and r.block_reason == "invalid_youtube_url",
-      f"{r.status} {r.block_reason}")
+    r = LinkScraper(delay=0)._scrape_youtube("https://youtube.com/watch?v=")
+    check("bad url -> invalid", r.status == "blocked" and r.block_reason == "invalid_youtube_url",
+          f"{r.status} {r.block_reason}")
 
-print("\n" + ("RESULT: FAILED" if FAILS else "RESULT: ALL PASS"))
-sys.exit(1 if FAILS else 0)
+    print("\n" + ("RESULT: FAILED" if FAILS else "RESULT: ALL PASS"))
+    return FAILS
+
+
+def test_all():
+    fails = run_all()
+    assert not fails, f"failed checks: {fails}"
+
+
+if __name__ == "__main__":
+    sys.exit(1 if run_all() else 0)

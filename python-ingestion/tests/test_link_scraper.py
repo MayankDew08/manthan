@@ -38,43 +38,55 @@ def check(name, cond, extra=""):
     print(f"[{'ok' if cond else 'FAIL'}] {name} {extra}")
 
 
-server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-thread = threading.Thread(target=server.serve_forever, daemon=True)
-thread.start()
-base = f"http://127.0.0.1:{server.server_address[1]}"
+def run_all():
+    FAILS.clear()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
 
-with LinkScraper(headless=True, delay=0, timeout_ms=15000) as scraper:
-    r = scraper.scrape(f"{base}/article_readmore.html")
-    check("readmore -> scraped", r.status == "scraped", f"{r.status} {r.block_reason}")
-    check("readmore expanded hidden section", "LangGraph" in r.raw_text and "CUDA 12.1" in r.raw_text,
-          f"{len(r.raw_text)} chars")
-    check("readmore title", r.title == "Read More Fixture", r.title)
+    try:
+        with LinkScraper(headless=True, delay=0, timeout_ms=15000) as scraper:
+            r = scraper.scrape(f"{base}/article_readmore.html")
+            check("readmore -> scraped", r.status == "scraped", f"{r.status} {r.block_reason}")
+            check("readmore expanded hidden section", "LangGraph" in r.raw_text and "CUDA 12.1" in r.raw_text,
+                  f"{len(r.raw_text)} chars")
+            check("readmore title", r.title == "Read More Fixture", r.title)
 
-    r = scraper.scrape(f"{base}/article_plain.html")
-    check("plain article scraped", r.status == "scraped" and "27b dense model" in r.raw_text,
-          f"{r.status} {len(r.raw_text)} chars")
+            r = scraper.scrape(f"{base}/article_plain.html")
+            check("plain article scraped", r.status == "scraped" and "27b dense model" in r.raw_text,
+                  f"{r.status} {len(r.raw_text)} chars")
 
-    r = scraper.scrape(f"{base}/login_wall.html")
-    check("login wall blocked", r.status == "blocked" and r.block_reason == "auth_required",
-          f"{r.status} {r.block_reason}")
+            r = scraper.scrape(f"{base}/login_wall.html")
+            check("login wall blocked", r.status == "blocked" and r.block_reason == "auth_required",
+                  f"{r.status} {r.block_reason}")
 
-    r = scraper.scrape(f"{base}/empty.html")
-    check("empty blocked", r.status == "blocked" and r.block_reason == "empty_content",
-          f"{r.status} {r.block_reason}")
+            r = scraper.scrape(f"{base}/empty.html")
+            check("empty blocked", r.status == "blocked" and r.block_reason == "empty_content",
+                  f"{r.status} {r.block_reason}")
 
-    r = scraper.scrape(f"{base}/paywall.html")
-    check("paywall blocked", r.status == "blocked" and r.block_reason == "paywall",
-          f"{r.status} {r.block_reason}")
+            r = scraper.scrape(f"{base}/paywall.html")
+            check("paywall blocked", r.status == "blocked" and r.block_reason == "paywall",
+                  f"{r.status} {r.block_reason}")
 
-    r = scraper.scrape(f"{base}/forbidden")
-    check("403 blocked", r.status == "blocked" and r.block_reason == "auth_required",
-          f"{r.status} {r.block_reason}")
+            r = scraper.scrape(f"{base}/forbidden")
+            check("403 blocked", r.status == "blocked" and r.block_reason == "auth_required",
+                  f"{r.status} {r.block_reason}")
 
-    r = scraper.scrape(f"{base}/notfound")
-    check("404 blocked", r.status == "blocked" and r.block_reason == "not_found",
-          f"{r.status} {r.block_reason}")
+            r = scraper.scrape(f"{base}/notfound")
+            check("404 blocked", r.status == "blocked" and r.block_reason == "not_found",
+                  f"{r.status} {r.block_reason}")
+    finally:
+        server.shutdown()
 
-server.shutdown()
+    print("\n" + ("RESULT: FAILED" if FAILS else "RESULT: ALL PASS"))
+    return FAILS
 
-print("\n" + ("RESULT: FAILED" if FAILS else "RESULT: ALL PASS"))
-sys.exit(1 if FAILS else 0)
+
+def test_all():
+    fails = run_all()
+    assert not fails, f"failed checks: {fails}"
+
+
+if __name__ == "__main__":
+    sys.exit(1 if run_all() else 0)

@@ -21,18 +21,29 @@ def check(name, condition, extra=""):
     print(f"[{'ok' if condition else 'FAIL'}] {name} {extra}")
 
 
-for name, worker, endpoint in (
-    ("ingest", ingest_worker, "/ingest-message"),
-    ("query", query_worker, "/search"),
-):
-    connection = worker.r.connection_pool.connection_kwargs
-    check(f"{name} worker reads Redis host", connection["host"] == "redis.internal",
-          connection["host"])
-    check(f"{name} worker reads Redis port", connection["port"] == 6380,
-          connection["port"])
-    check(f"{name} worker reads API URL",
-          worker.URL == f"http://api.internal:9000{endpoint}", worker.URL)
-    check(f"{name} worker reads bot token", worker.BOT_TOKEN == "test-token")
+def run_all():
+    FAILS.clear()
+    for name, worker, endpoint in (
+        ("ingest", ingest_worker, "/ingest-message"),
+        ("query", query_worker, "/search"),
+    ):
+        connection = worker.r.connection_pool.connection_kwargs
+        check(f"{name} worker reads Redis host", connection["host"] == "redis.internal",
+              connection["host"])
+        check(f"{name} worker reads Redis port", connection["port"] == 6380,
+              connection["port"])
+        check(f"{name} worker reads API URL",
+              worker.URL == f"http://api.internal:9000{endpoint}", worker.URL)
+        check(f"{name} worker reads bot token", worker.BOT_TOKEN == "test-token")
 
-print("\n" + ("RESULT: FAILED" if FAILS else "RESULT: ALL PASS"))
-sys.exit(1 if FAILS else 0)
+    print("\n" + ("RESULT: FAILED" if FAILS else "RESULT: ALL PASS"))
+    return FAILS
+
+
+def test_all():
+    fails = run_all()
+    assert not fails, f"failed checks: {fails}"
+
+
+if __name__ == "__main__":
+    sys.exit(1 if run_all() else 0)
