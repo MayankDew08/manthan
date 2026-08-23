@@ -17,6 +17,7 @@ CONSUMER = "ingest-worker-1"
 CONFIG = load_worker_config()
 BOT_TOKEN = CONFIG.bot_token
 URL = f"{CONFIG.api_base_url}/ingest-message"
+PASTE_URL = f"{CONFIG.api_base_url}/links/paste"
 
 r = redis.Redis(
     host=CONFIG.redis_host,
@@ -69,22 +70,80 @@ def call_ingest_api(payload: dict) -> dict:
             "skip_grading": payload.get("skip_grading", False),
             "received_at": payload.get("received_at"),
         },
-        timeout=120,
+        timeout=(10, CONFIG.ingest_timeout),
     )
 
     response.raise_for_status()
     return response.json()
 
 
-def format_ingest_reply(result: dict) -> str:
-    """Keep Telegram replies compact while surfacing the extracted metadata."""
-    msg = result.get("message", {})
-    return (
-        "Stored successfully\n"
-        f"Quality: {msg.get('quality', 'skipped')}\n"
-        f"Topics: {', '.join(msg.get('topics') or [])}\n"
-        f"Entities: {', '.join(msg.get('entities') or [])}"
+def call_paste_api(payload: dict) -> dict:
+    """Complete a blocked link with manually pasted content."""
+    response = requests.post(
+        PASTE_URL,
+        json={
+            "link_id": payload.get("link_id", ""),
+            "content": payload.get("text", ""),
+        },
+        timeout=(10, CONFIG.ingest_timeout),
     )
+
+    if response.status_code == 404:
+        return {"ok": False, "error": "unknown link id",
+                "link_id": payload.get("link_id", "")}
+    if response.status_code == 422:
+        return {"ok": False, "error": "link id and content are required"}
+
+    response.raise_for_status()
+    return response.json()
+
+
+def format_paste_reply(result: dict) -> str:
+    """Confirm a completed paste with the stored title and topics."""
+    if not result.get("ok"):
+        detail = result.get("error") or result.get("detail") or "paste failed"
+        return f"Paste failed — {detail}"
+    parts = [
+        "Pasted successfully",
+        result.get("url", ""),
+        f"Title: {result.get('title', '') or '-'}",
+        f"Topics: {', '.join(result.get('topics') or []) or '-'}",
+    ]
+    if result.get("summary"):
+        parts.append(f"Summary: {result['summary'][:300]}")
+    return "\n".join(parts)
+
+
+def _format_link_outcomes(result: dict) -> str:
+    """Render per-link outcomes so senders see what happened to each URL."""
+    outcomes = result.get("link_outcomes") or []
+    if not outcomes:
+        return ""
+    lines = []
+    for out in outcomes:
+        line = f"• {out.get('url', '')} — {out.get('status', 'unknown')}"
+        if out.get("block_reason"):
+            line += f" ({out['block_reason']})"
+        if out.get("title"):
+            line += f"\n  {out['title']}"
+        lines.append(line)
+    return "Links:\n" + "\n".join(lines)
+
+
+def format_ingest_reply(result: dict) -> str:
+    """Keep Telegram replies compact while surfacing metadata and link outcomes."""
+    msg = result.get("message", {})
+    parts = [
+        "Stored successfully" if result.get("ok") else "Ingestion failed",
+        f"Quality: {msg.get('quality', 'skipped')}",
+        f"Topics: {', '.join(msg.get('topics') or []) or '-'}",
+        f"Entities: {', '.join(msg.get('entities') or []) or '-'}",
+    ]
+    links = _format_link_outcomes(result)
+    if links:
+        parts.append(links)
+    parts.append(f"Vectored: {'yes' if result.get('vectored') else 'no'}")
+    return "\n".join(parts)
 
 
 def main():
@@ -114,8 +173,12 @@ def main():
                 print("Redis message ID:", message_id)
                 print("Job ID:", payload.get("job_id"))
 
-                result = call_ingest_api(payload)
-                reply = format_ingest_reply(result)
+                if payload.get("type") == "paste":
+                    result = call_paste_api(payload)
+                    reply = format_paste_reply(result)
+                else:
+                    result = call_ingest_api(payload)
+                    reply = format_ingest_reply(result)
 
                 send_telegram_message(
                     payload["chat_id"],

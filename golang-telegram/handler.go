@@ -49,6 +49,7 @@ type IngestJob struct {
 	ChatID            int64     `json:"chat_id"`
 	SenderName        string    `json:"sender_name"`
 	Text              string    `json:"text"`
+	LinkID            string    `json:"link_id"`
 	TelegramMessageID int64     `json:"telegram_message_id"`
 	SkipGrading       bool      `json:"skip_grading"`
 	ReceivedAt        time.Time `json:"received_at"`
@@ -88,6 +89,91 @@ func handleUpdate(ctx context.Context, update TelegramUpdate, queue *Queue) erro
 		}
 
 		log.Println("published query job:", job.JobID)
+	} else if route == "blocked" {
+		job := QueryJob{
+			JobID:            fmt.Sprintf("%d", time.Now().UnixNano()),
+			TelegramUpdateID: update.UpdateID,
+			Type:             "blocked",
+			ChatID:           update.Message.Chat.ID,
+			Text:             cleanText(update.Message.Text),
+			ReceivedAt:       time.Now().UTC(),
+		}
+
+		payload, err := json.Marshal(job)
+		if err != nil {
+			return err
+		}
+
+		if err := queue.Publish(ctx, "manthan:queries", string(payload)); err != nil {
+			return err
+		}
+
+		log.Println("published query job:", job.JobID)
+	} else if route == "paste" {
+		linkID, content := parsePaste(update.Message.Text)
+		job := IngestJob{
+			JobID:             fmt.Sprintf("%d", time.Now().UnixNano()),
+			TelegramUpdateID:  update.UpdateID,
+			Type:              "paste",
+			ChatID:            update.Message.Chat.ID,
+			SenderName:        resolveSender(update.Message.From, ""),
+			Text:              content,
+			LinkID:            linkID,
+			TelegramMessageID: update.Message.MessageID,
+			SkipGrading:       true,
+			ReceivedAt:        time.Now().UTC(),
+		}
+
+		payload, err := json.Marshal(job)
+		if err != nil {
+			return err
+		}
+
+		if err := queue.Publish(ctx, "manthan:ingest", string(payload)); err != nil {
+			return err
+		}
+
+		log.Println("published paste job:", job.JobID)
+	} else if route == "skip" {
+		job := QueryJob{
+			JobID:            fmt.Sprintf("%d", time.Now().UnixNano()),
+			TelegramUpdateID: update.UpdateID,
+			Type:             "skip",
+			ChatID:           update.Message.Chat.ID,
+			Text:             parseSkip(update.Message.Text),
+			ReceivedAt:       time.Now().UTC(),
+		}
+
+		payload, err := json.Marshal(job)
+		if err != nil {
+			return err
+		}
+
+		if err := queue.Publish(ctx, "manthan:queries", string(payload)); err != nil {
+			return err
+		}
+
+		log.Println("published query job:", job.JobID)
+	} else if route == "start" {
+		job := QueryJob{
+			JobID:            fmt.Sprintf("%d", time.Now().UnixNano()),
+			TelegramUpdateID: update.UpdateID,
+			Type:             "start",
+			ChatID:           update.Message.Chat.ID,
+			Text:             "",
+			ReceivedAt:       time.Now().UTC(),
+		}
+
+		payload, err := json.Marshal(job)
+		if err != nil {
+			return err
+		}
+
+		if err := queue.Publish(ctx, "manthan:queries", string(payload)); err != nil {
+			return err
+		}
+
+		log.Println("published start job:", job.JobID)
 	} else {
 		content, skip := parseIngest(update.Message.Text)
 		via, content := parseVia(content)
@@ -122,6 +208,10 @@ func classify(text string) string {
 	// Prefix-based routing keeps Telegram usage simple without a separate command parser.
 	text = strings.TrimSpace(text)
 
+	if strings.HasPrefix(text, "/start") {
+		return "start"
+	}
+
 	if strings.HasPrefix(text, "/ask") {
 		return "query"
 	}
@@ -132,6 +222,18 @@ func classify(text string) string {
 
 	if strings.HasPrefix(text, "/via") {
 		return "ingest"
+	}
+
+	if strings.HasPrefix(text, "/paste") {
+		return "paste"
+	}
+
+	if strings.HasPrefix(text, "/skip") {
+		return "skip"
+	}
+
+	if strings.HasPrefix(text, "/blocked") {
+		return "blocked"
 	}
 
 	if strings.Contains(text, "http://") || strings.Contains(text, "https://") {
@@ -186,6 +288,24 @@ func parseVia(text string) (via string, rest string) {
 	}
 
 	return "", text
+}
+
+func parsePaste(text string) (linkID string, content string) {
+	// "/paste LNK-AD1303 : ..." completes a blocked link with manual content.
+	text = strings.TrimSpace(text)
+	text = strings.TrimSpace(strings.TrimPrefix(text, "/paste"))
+
+	if i := strings.Index(text, ":"); i != -1 {
+		return strings.TrimSpace(text[:i]), strings.TrimSpace(text[i+1:])
+	}
+
+	return "", text
+}
+
+func parseSkip(text string) string {
+	// "/skip LNK-AD1303" dismisses a link that is not worth completing.
+	text = strings.TrimSpace(text)
+	return strings.TrimSpace(strings.TrimPrefix(text, "/skip"))
 }
 
 func resolveSender(from *TelegramUser, via string) string {

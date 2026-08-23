@@ -11,6 +11,7 @@ from vector_store import VectorStore
 
 ENRICHED_FILE = "enriched_messages.json"
 SCRAPED_FILE = "scraped_links.json"
+BLOCKED_FILE = "blocked_links.json"
 ASK_USER_FILE = "ask_user_links.json"
 MIN_QUALITY = 4
 
@@ -23,12 +24,18 @@ def _link_has_content(link: dict) -> bool:
 
 def push_to_stores(enriched: List[dict], scraped: List[dict],
                    ask_user: Optional[List[dict]] = None,
-                   min_quality: int = MIN_QUALITY) -> dict:
+                   min_quality: int = MIN_QUALITY,
+                   blocked: Optional[List[dict]] = None,
+                   store: Optional[KnowledgeStore] = None,
+                   vs: Optional[VectorStore] = None) -> dict:
     """Write graded messages, scraped links, and pending links into backing stores."""
     load_dotenv()
-    store = KnowledgeStore()
-    vs = VectorStore()
-    vs.ensure_collection()
+    own_store = store is None
+    own_vs = vs is None
+    store = store if store is not None else KnowledgeStore()
+    vs = vs if vs is not None else VectorStore()
+    if own_vs:
+        vs.ensure_collection()
     try:
         n_msg = 0
         n_vectored = 0
@@ -48,6 +55,11 @@ def push_to_stores(enriched: List[dict], scraped: List[dict],
                 vs.upsert_link(link)
                 n_vectored_links += 1
 
+        n_blocked = 0
+        for rec in blocked or []:
+            store.add_link(rec, status="blocked")
+            n_blocked += 1
+
         n_pending = 0
         for rec in ask_user or []:
             store.add_pending_link(rec)
@@ -58,11 +70,14 @@ def push_to_stores(enriched: List[dict], scraped: List[dict],
             "vectored_messages": n_vectored,
             "scraped_links": n_links,
             "vectored_links": n_vectored_links,
+            "blocked_links": n_blocked,
             "pending_links": n_pending,
         }
     finally:
-        store.close()
-        vs.close()
+        if own_store:
+            store.close()
+        if own_vs:
+            vs.close()
 
 
 def run_full_ingest(chat_path: str, *, force: bool = False,
@@ -74,6 +89,8 @@ def run_full_ingest(chat_path: str, *, force: bool = False,
     enriched = load_list(ENRICHED_FILE)
     scraped = load_list(SCRAPED_FILE)
     ask_user = load_list(ASK_USER_FILE)
-    summary = push_to_stores(enriched, scraped, ask_user, min_quality)
+    blocked = load_list(BLOCKED_FILE)
+    summary = push_to_stores(enriched, scraped, ask_user, min_quality,
+                             blocked=blocked)
     summary["chat_path"] = chat_path
     return summary

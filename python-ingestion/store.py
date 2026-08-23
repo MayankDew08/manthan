@@ -1,6 +1,8 @@
 """Persist messages, links, entities, and topics in the Neo4j knowledge graph."""
 
+import hashlib
 import os
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from neo4j import GraphDatabase
@@ -25,6 +27,11 @@ def _url_to_title(url: str) -> str:
     ]
     keep = segments[-2:]
     return host + ("/" + "/".join(keep) if keep else "")
+
+
+def link_id(url: str) -> str:
+    """Derive a stable short identifier for a link from its URL."""
+    return "LNK-" + hashlib.sha1((url or "").encode("utf-8")).hexdigest()[:6].upper()
 
 
 class KnowledgeStore:
@@ -105,7 +112,9 @@ class KnowledgeStore:
                 l.link_intent = $link_intent,
                 l.scraped_at = $scraped_at,
                 l.sent_at = $sent_at,
-                l.status = $status
+                l.status = $status,
+                l.block_reason = $block_reason,
+                l.link_id = $link_id
             WITH l
             FOREACH (name IN $entities |
                 MERGE (e:Entity {name: name})
@@ -135,6 +144,8 @@ class KnowledgeStore:
             msg_sent_at=ctx.get("sent_at") or "",
             text=ctx.get("original_text") or "",
             status=status,
+            block_reason=link.get("block_reason") or "",
+            link_id=link_id(url),
         )
 
     def add_pending_link(self, record: dict):
@@ -153,7 +164,8 @@ class KnowledgeStore:
                 l.partial_text = $partial_text,
                 l.link_intent = $link_intent,
                 l.sent_at = $sent_at,
-                l.title = coalesce(l.title, $title)
+                l.title = coalesce(l.title, $title),
+                l.link_id = $link_id
             """,
             url=url,
             block_reason=record.get("block_reason") or "",
@@ -161,21 +173,52 @@ class KnowledgeStore:
             link_intent=((record.get("message_context") or {}).get("link_intent")) or "",
             sent_at=record.get("sent_at") or "",
             title=_url_to_title(url),
+            link_id=link_id(url),
         )
 
+    def link_by_id(self, link_id: str):
+        """Return {url, status, title} for a paste-ready id, or None."""
+        with self.driver.session() as session:
+            row = session.run(
+                """
+                MATCH (l:Link {link_id: $id})
+                RETURN l.url AS url, l.status AS status, l.title AS title
+                """,
+                id=link_id,
+            ).single()
+        return dict(row) if row else None
+
+    def skip_link(self, link_id: str):
+        """Mark a pending or blocked link as intentionally skipped."""
+        with self.driver.session() as session:
+            row = session.run(
+                """
+                MATCH (l:Link {link_id: $id})
+                WHERE l.status IN ['blocked', 'pending_paste']
+                SET l.status = 'skipped', l.skipped_at = $now
+                RETURN l.url AS url
+                """,
+                id=link_id,
+                now=datetime.now(timezone.utc).isoformat(),
+            ).single()
+        return dict(row) if row else None
+
     def pending_links(self) -> list:
-        """Return unresolved manual-paste links in chronological order."""
+        """Return manual-paste and blocked links in chronological order."""
         with self.driver.session() as session:
             rows = session.run(
                 """
                 MATCH (l:Link)
-                WHERE l.status = 'pending_paste'
+                WHERE l.status IN ['pending_paste', 'blocked']
                 RETURN l.url AS url, l.title AS title,
+                       l.status AS status,
                        l.block_reason AS block_reason,
                        l.partial_text AS partial_text,
                        l.link_intent AS link_intent,
-                       l.sent_at AS sent_at
+                       l.sent_at AS sent_at,
+                       l.link_id AS link_id
                 ORDER BY l.sent_at
                 """
             ).data()
-        return rows
+        return [dict(row, link_id=row.get("link_id") or link_id(row["url"]))
+                for row in rows]

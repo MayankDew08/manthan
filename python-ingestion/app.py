@@ -17,9 +17,10 @@ from pydantic import BaseModel, Field
 
 import embedder
 import enhancer
+import ingest
 import pipeline
-from grader import grade_messages
-from link_extract import extract_links, parse_github_url
+from link_extract import parse_github_url
+from link_ingest import mark_resolved
 from search import search
 from store import KnowledgeStore, _url_to_title
 from vector_store import VectorStore
@@ -32,6 +33,7 @@ SEARCH_REQUESTS = Counter("manthan_search_requests_total", "search requests", ["
 SEARCH_LATENCY = Histogram("manthan_search_seconds", "search latency", ["engine"])
 INGEST_JOBS = Counter("manthan_ingest_jobs_total", "ingest background jobs", ["outcome"])
 PASTE_REQUESTS = Counter("manthan_paste_requests_total", "paste-link requests", ["outcome"])
+SKIP_REQUESTS = Counter("manthan_skip_requests_total", "skip-link requests", ["outcome"])
 MESSAGES_QUERIES = Counter("manthan_messages_queries_total", "messages list queries")
 PENDING_QUERIES = Counter("manthan_pending_queries_total", "pending-links queries")
 
@@ -88,8 +90,13 @@ class IngestMessageRequest(BaseModel):
 
 
 class PasteRequest(BaseModel):
-    url: str
+    url: str = ""
     content: str
+    link_id: Optional[str] = None
+
+
+class SkipRequest(BaseModel):
+    link_id: str
 
 
 @asynccontextmanager
@@ -171,68 +178,32 @@ def get_job(job_id: str):
 
 @app.post("/ingest-message")
 def ingest_message(req: IngestMessageRequest):
-    """Store one message and vectorize it when it passes the quality threshold."""
+    """Run the checkpointed pipeline for one message and persist the results."""
     text = req.text.strip()
     if not text:
         raise HTTPException(status_code=422, detail="text is required")
-
     sent_at = req.received_at or datetime.now(timezone.utc).isoformat()
-    sender = req.sender_name or ""
-
-    if req.skip_grading:
-        quality, trusted = 5, True
-    else:
-        try:
-            graded = grade_messages([text])
-        except Exception:
-            logger.exception("Message grading failed")
-            raise HTTPException(status_code=502, detail="grading failed")
-        quality, trusted = graded[0].quality, False
-
-    links = extract_links(text)
     try:
-        en = enhancer.enrich_message(text, links)
+        result = ingest.ingest_message(
+            text,
+            sender=req.sender_name or "",
+            sent_at=sent_at,
+            trusted=bool(req.skip_grading),
+            store=app.state.store,
+            vs=app.state.vs,
+        )
+    except ValueError:
+        raise HTTPException(status_code=422, detail="text is required")
     except Exception:
-        logger.exception("Message enrichment failed; using empty metadata")
-        en = {"link_intent": None, "entities": [], "topics": []}
-
-    record = {
-        "sent_at": sent_at,
-        "sender": sender,
-        "quality": quality,
-        "original_text": text,
-        "links": links,
-        "link_intent": en.get("link_intent"),
-        "entities": en.get("entities") or [],
-        "topics": en.get("topics") or [],
-        "trusted": trusted,
-    }
-
-    app.state.store.add_message(record)
-    vectored = False
-    if quality >= pipeline.MIN_QUALITY:
-        app.state.vs.upsert_message(record)
-        vectored = True
-
+        logger.exception("Message ingestion failed (checkpoint retained for resume)")
+        raise HTTPException(status_code=502, detail="ingestion failed")
     INGEST_JOBS.labels(outcome="success").inc()
-    return {
-        "ok": True,
-        "message": {
-            "sender": sender,
-            "sent_at": sent_at,
-            "quality": quality,
-            "trusted": trusted,
-            "topics": record["topics"],
-            "entities": record["entities"],
-            "links": links,
-        },
-        "vectored": vectored,
-    }
+    return result
 
 
 @app.get("/links/pending")
 def pending_links():
-    """List links that still need a manual pasted-content fallback."""
+    """List links awaiting manual paste plus links blocked during scraping."""
     PENDING_QUERIES.inc()
     rows = app.state.store.pending_links()
     return {"count": len(rows), "links": rows}
@@ -252,6 +223,12 @@ def _existing_title(url: str) -> str:
 def paste_link(req: PasteRequest):
     """Summarize pasted content for a blocked link and persist the result."""
     url = req.url.strip()
+    if not url and req.link_id:
+        found = app.state.store.link_by_id(req.link_id.strip())
+        if found is None:
+            raise HTTPException(status_code=404,
+                                detail=f"unknown link id: {req.link_id}")
+        url = found["url"]
     content = req.content.strip()
     if not url or not content:
         raise HTTPException(status_code=422, detail="url and content are required")
@@ -287,6 +264,11 @@ def paste_link(req: PasteRequest):
     }
     app.state.store.add_link(link, status="scraped")
     app.state.vs.upsert_link(link)
+    try:
+        resolved = mark_resolved(url)
+    except Exception:
+        resolved = 0
+        logger.exception("Failed to sync ask_user_links.json for %s", url)
     PASTE_REQUESTS.labels(outcome="success").inc()
     return {
         "ok": True,
@@ -295,7 +277,25 @@ def paste_link(req: PasteRequest):
         "summary": summary.get("summary", ""),
         "topics": summary.get("topics", []),
         "entities": summary.get("entities", []),
+        "resolved_records": resolved,
     }
+
+
+@app.post("/links/skip")
+def skip_link(req: SkipRequest):
+    """Dismiss a pending or blocked link without ingesting it."""
+    SKIP_REQUESTS.labels(outcome="attempt").inc()
+    found = app.state.store.skip_link(req.link_id.strip())
+    if found is None:
+        SKIP_REQUESTS.labels(outcome="error").inc()
+        existing = app.state.store.link_by_id(req.link_id.strip())
+        if existing is None:
+            raise HTTPException(status_code=404,
+                                detail=f"unknown link id: {req.link_id}")
+        raise HTTPException(status_code=409,
+                            detail=f"link already {existing['status']}: {req.link_id}")
+    SKIP_REQUESTS.labels(outcome="success").inc()
+    return {"ok": True, "url": found["url"], "status": "skipped"}
 
 
 def _query_messages(*, sender: Optional[str], topic: Optional[str],

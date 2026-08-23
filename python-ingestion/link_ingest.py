@@ -21,6 +21,20 @@ def _pending() -> list:
                   key=lambda x: x.get("sent_at", ""))
 
 
+def mark_resolved(url: str) -> int:
+    """Mark every unresolved ask-user record for ``url`` as resolved."""
+    items = load_list(ASK_USER_FILE)
+    hits = 0
+    for rec in items:
+        if rec.get("url") == url and not rec.get("resolved"):
+            rec["resolved"] = True
+            rec["ingested_at"] = _now()
+            hits += 1
+    if hits:
+        save_list(ASK_USER_FILE, items)
+    return hits
+
+
 def list_ask_user() -> None:
     """Print unresolved links with stable indexes for the ingest command."""
     pending = _pending()
@@ -93,9 +107,7 @@ def ingest(index: int, file_path: str = None) -> None:
     scraped.append(to_dict(sl))
     save_list(SCRAPED_FILE, scraped)
 
-    rec["resolved"] = True
-    rec["ingested_at"] = _now()
-    save_list(ASK_USER_FILE, items)
+    mark_resolved(rec.get("url", ""))
     print(f"Ingested {rec.get('url')} -> {SCRAPED_FILE} (ask-user record marked resolved)")
 
 

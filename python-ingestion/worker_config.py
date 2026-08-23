@@ -12,6 +12,7 @@ class WorkerConfig:
     redis_host: str
     redis_port: int
     api_base_url: str
+    ingest_timeout: int
 
 
 def load_worker_config() -> WorkerConfig:
@@ -36,9 +37,17 @@ def load_worker_config() -> WorkerConfig:
     if api_url.scheme not in {"http", "https"} or not api_url.netloc:
         raise RuntimeError("MANTHAN_API_URL must be an HTTP(S) URL")
 
+    try:
+        ingest_timeout = int(os.environ.get("MANTHAN_INGEST_TIMEOUT", "1800"))
+    except ValueError as exc:
+        raise RuntimeError("MANTHAN_INGEST_TIMEOUT must be an integer") from exc
+    if ingest_timeout <= 0:
+        raise RuntimeError("MANTHAN_INGEST_TIMEOUT must be positive")
+
     return WorkerConfig(
         bot_token=bot_token,
         redis_host=redis_url.hostname,
         redis_port=redis_port,
         api_base_url=api_base_url,
+        ingest_timeout=ingest_timeout,
     )

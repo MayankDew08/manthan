@@ -41,3 +41,5 @@ python-ingestion/evals/
 # Logs / Temp
 *.log
 tmp/
+logs/
+.run/
