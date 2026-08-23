@@ -78,7 +78,7 @@ The embedding model is downloaded on first use. Link enrichment also makes outbo
 Clone the repository and create a local configuration:
 
 ```bash
-git clone <your-fork-or-repository-url>
+git clone https://github.com/MayankDew08/manthan.git
 cd Manthan
 cp python-ingestion/.env.example python-ingestion/.env
 ```
@@ -222,7 +222,7 @@ go test ./...
 go vet ./...
 ```
 
-When contributing, keep changes focused, add tests for behavior changes, avoid committing generated or personal data, and run both check sets. Bug reports and focused pull requests are welcome.
+When contributing, keep changes focused, add tests for behavior changes, avoid committing generated or personal data, and run both check sets. Bug reports and focused pull requests are welcome on [GitHub Issues](https://github.com/MayankDew08/manthan/issues) and [pull requests](https://github.com/MayankDew08/manthan/pulls).
 
 ## Privacy and security
 
