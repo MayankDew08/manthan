@@ -80,19 +80,20 @@ Clone the repository and create a local configuration:
 ```bash
 git clone https://github.com/MayankDew08/manthan.git
 cd Manthan
+cp .env.example .env
 cp python-ingestion/.env.example python-ingestion/.env
 ```
 
-Edit `python-ingestion/.env` and set:
+Edit `.env` and set `NEO4J_PASSWORD` to a new local password. Then edit `python-ingestion/.env` and set:
 
 - `LLAMA_BASE_URL` to the base URL of your OpenAI-compatible local server
 - `LLAMA_MODEL` to the model name accepted by that server
-- `NEO4J_PASSWORD` to a new local password
+- `NEO4J_PASSWORD` to the same local password
 
-Start Neo4j, Qdrant, and Redis. Compose reads the same Neo4j password used by the Python service:
+Start Neo4j, Qdrant, and Redis. Compose reads the root `.env`, so keep both passwords in sync:
 
 ```bash
-docker compose --env-file python-ingestion/.env up -d
+make dbs
 ```
 
 Install Python dependencies and the Chromium runtime used by the scraper:
@@ -103,10 +104,10 @@ uv sync --locked
 uv run playwright install chromium
 ```
 
-Start the API on the local interface:
+Start the API in the background on the local interface:
 
 ```bash
-uv run uvicorn app:app --host 127.0.0.1 --port 8000
+make server-python
 ```
 
 Open <http://127.0.0.1:8000/docs> for the interactive API documentation, or check the service with:
@@ -157,56 +158,41 @@ Use `--chat-label` only for a label that is safe to publish. Always review gener
 
 ## Run the complete Telegram stack
 
-The bot is a multi-process local stack. Compose runs Neo4j, Qdrant, and Redis together; FastAPI owns the search and ingestion API; two Python workers consume Redis streams; and the Go process polls Telegram. Start them in the order below so every process finds its dependencies ready. The OpenAI-compatible local LLM configured in `python-ingestion/.env` must also be listening before you send ingestion jobs.
+The bot is a multi-process local stack managed by `make`: Compose runs Neo4j, Qdrant, and Redis together; FastAPI owns the search and ingestion API; two Python workers consume Redis streams; and the Go process polls Telegram. Start them in the order below so every process finds its dependencies ready. The OpenAI-compatible local LLM configured in `python-ingestion/.env` must also be listening before you send ingestion jobs.
 
 First, configure the bridge. Use the same `TELEGRAM_BOT_TOKEN` in `golang-telegram/.env` and `python-ingestion/.env`; set `ALLOWED_TELEGRAM_USER_ID` only in the Go configuration.
 
 ```bash
 cp golang-telegram/.env.example golang-telegram/.env
-# Edit both .env files before continuing.
+# Edit all .env files before continuing.
 ```
 
-1. From the repository root, start all three backing services and confirm they are healthy/running:
+1. Start the backing services (Neo4j, Qdrant, Redis) from the repository root:
 
    ```bash
-   docker compose --env-file python-ingestion/.env up -d
-   docker compose --env-file python-ingestion/.env ps
+   make dbs
    ```
 
-2. Keep FastAPI running in its own terminal:
+2. Start FastAPI, both workers, and the Go Telegram bridge:
 
    ```bash
-   cd python-ingestion
-   uv run uvicorn app:app --host 127.0.0.1 --port 8000
+   make server-python
+   make workers
+   make server-go
    ```
 
-3. Keep the ingestion worker running in a second terminal:
+Every process runs in the background, writes to a log under `logs/`, and records its PID under `.run/`. Re-running any target is safe — it skips processes that are already alive.
 
-   ```bash
-   cd python-ingestion
-   uv run python ingest_worker.py
-   ```
-
-4. Keep the query worker running in a third terminal:
-
-   ```bash
-   cd python-ingestion
-   uv run python query_worker.py
-   ```
-
-5. Start the Go Telegram bridge in a fourth terminal:
-
-   ```bash
-   cd golang-telegram
-   go run .
-   ```
-
-The separate terminals are intentional: all four application processes must remain alive while chatting with the bot. For an unattended deployment, run the same commands under a process supervisor. `REDIS_ADDR` and `MANTHAN_API_URL` default to the local Compose and API addresses and may be overridden in both environment files for another deployment.
-
-Only the configured Telegram user ID is accepted by the bot. Telegram messages necessarily pass through Telegram's service; this optional workflow is not fully local. Stop the application processes with `Ctrl-C`, then stop the backing services from the repository root with:
+Check progress with:
 
 ```bash
-docker compose --env-file python-ingestion/.env down
+tail -f logs/bot.log logs/worker-query.log logs/worker-ingest.log
+```
+
+Only the configured Telegram user ID is accepted by the bot. Telegram messages necessarily pass through Telegram's service; this optional workflow is not fully local. Stop the application processes with `make stop` (Compose containers are untouched), then stop the backing services with:
+
+```bash
+make dbs-down
 ```
 
 ## Development
