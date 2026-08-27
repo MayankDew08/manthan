@@ -7,6 +7,7 @@ import redis
 import requests
 from dotenv import load_dotenv
 from worker_config import load_worker_config
+from typing import cast, List, Tuple, Dict
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -18,6 +19,8 @@ CONFIG = load_worker_config()
 BOT_TOKEN = CONFIG.bot_token
 URL = f"{CONFIG.api_base_url}/ingest-message"
 PASTE_URL = f"{CONFIG.api_base_url}/links/paste"
+
+StreamReply = List[Tuple[str, List[Tuple[str, Dict[str, str]]]]]
 
 r = redis.Redis(
     host=CONFIG.redis_host,
@@ -153,7 +156,7 @@ def main():
     print("Ingest worker started")
 
     while True:
-        messages = r.xreadgroup(
+        raw = r.xreadgroup(
             groupname=GROUP,
             consumername=CONSUMER,
             streams={
@@ -162,6 +165,7 @@ def main():
             count=1,
             block=5000,
         )
+        messages = cast(StreamReply, raw)
 
         if not messages:
             continue

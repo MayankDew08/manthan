@@ -7,6 +7,7 @@ import redis
 import requests
 from dotenv import load_dotenv
 from worker_config import load_worker_config
+from typing import cast, List, Tuple, Dict
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -39,6 +40,9 @@ r = redis.Redis(
     decode_responses=True,
 )
 
+StreamReply = List[Tuple[str, List[Tuple[str, Dict[str, str]]]]]
+
+
 
 def ensure_group():
     """Create the query consumer group once and tolerate repeat starts."""
@@ -49,7 +53,7 @@ def ensure_group():
             id="0",
             mkstream=True,
         )
-    except redis.ResponseError as exc:
+    except redis.ResponseError as exc: 
         if "BUSYGROUP" not in str(exc):
             raise
 
@@ -129,20 +133,22 @@ def main():
     print("Query worker started")
 
     while True:
-        messages = r.xreadgroup(
-            groupname=GROUP,
-            consumername=CONSUMER,
-            streams={
-                STREAM: ">"
-            },
-            count=1,
-            block=5000,
-        )
+        raw = r.xreadgroup(
+                    groupname=GROUP,
+                    consumername=CONSUMER,
+                    streams={
+                        STREAM: ">"
+                    },
+                    count=1,
+                    block=5000,
+                )
+        messages = cast(StreamReply, raw)
 
         if not messages:
             continue
 
-        for _, entries in messages:
+        for _,entries in messages:
+            
             for message_id, fields in entries:
                 payload = json.loads(fields["data"])
 

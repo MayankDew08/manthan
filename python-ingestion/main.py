@@ -180,9 +180,10 @@ def build_graph(checkpointer=None):
 
 
 def run_pipeline(chat_path: str) -> dict:
+    from langchain_core.runnables.config import RunnableConfig
     """Run or resume a chat-specific graph using a stable checkpoint thread ID."""
     thread = "manthan-" + hashlib.sha1(chat_path.encode("utf-8")).hexdigest()[:16]
-    config = {"configurable": {"thread_id": thread}}
+    config = RunnableConfig({"configurable": {"thread_id": thread}})
     with SqliteSaver.from_conn_string(CHECKPOINT_DB) as saver:
         app = build_graph(checkpointer=saver)
         snap = app.get_state(config)
