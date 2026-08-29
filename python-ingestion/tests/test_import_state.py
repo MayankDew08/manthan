@@ -58,7 +58,7 @@ def test_append_keeps_previous_ids():
 
 def test_find_unseen_messages_filters_processed():
     store = ImportStateStore(db_path=":memory:")
-    store.upsert_source("local:test-chat", "local", "chat.txt", "rev-1")
+    store.upsert_source("local:test-chat", "local", "chat.txt")
 
     all_ids = [
         "id-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -76,9 +76,25 @@ def test_find_unseen_messages_filters_processed():
     assert store.find_unseen_messages("local:test-chat", all_ids) == [all_ids[2]]
 
 
+def test_find_unseen_messages_chunks_large_input():
+    # Exceeds SQLite's default 999 host-parameter limit to exercise chunking.
+    store = ImportStateStore(db_path=":memory:")
+    store.upsert_source("local:big", "local", "big.txt")
+
+    ids = [f"id-{i:04d}" for i in range(1500)]
+    # None processed yet -> all 1500 unseen
+    assert len(store.find_unseen_messages("local:big", ids)) == 1500
+
+    # Mark the first 500 as processed; the remaining 1000 must come back unseen.
+    store.mark_processed("local:big", [(mid, "stored") for mid in ids[:500]])
+    unseen = store.find_unseen_messages("local:big", ids)
+    assert len(unseen) == 1000
+    assert set(unseen) == set(ids[500:])
+
+
 def test_mark_processed_records_outcome_and_is_idempotent():
     store = ImportStateStore(db_path=":memory:")
-    store.upsert_source("local:test-chat", "local", "chat.txt", "rev-1")
+    store.upsert_source("local:test-chat", "local", "chat.txt")
 
     store.mark_processed("local:test-chat", [
         ("id-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "stored"),
@@ -112,20 +128,24 @@ def test_get_source_returns_metadata_and_none_when_missing():
     store = ImportStateStore(db_path=":memory:")
     assert store.get_source("local:missing") is None
 
-    store.upsert_source("local:chat", "local", "chat.txt", "rev-1")
+    store.upsert_source("local:chat", "local", "chat.txt")
     row = store.get_source("local:chat")
+    assert row is not None
     assert row["source_id"] == "local:chat"
     assert row["source_type"] == "local"
     assert row["file_name"] == "chat.txt"
-    assert row["revision"] == "rev-1"
+    # Revision is owned solely by update_source_revision; upsert sets no
+    # revision, so a freshly registered source has none yet.
+    assert row["revision"] is None
 
 
 def test_update_source_revision_sets_revision_and_import_time():
     store = ImportStateStore(db_path=":memory:")
-    store.upsert_source("local:chat", "local", "chat.txt", "rev-1")
+    store.upsert_source("local:chat", "local", "chat.txt")
 
     store.update_source_revision("local:chat", "rev-2")
     row = store.get_source("local:chat")
+    assert row is not None
     assert row["revision"] == "rev-2"
     assert row["imported_at"] is not None
 

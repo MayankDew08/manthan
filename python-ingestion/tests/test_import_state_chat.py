@@ -89,7 +89,7 @@ def test_incremental_import_flow(tmp_path):
     aug = identify_messages(SRC, parser.parse_chat(_augmented_path(tmp_path)))
 
     store = ImportStateStore(str(tmp_path / "import_state.sqlite"))
-    store.upsert_source(SRC, "local", "test_chat.txt", "rev-1")
+    store.upsert_source(SRC, "local", "test_chat.txt")
 
     first = store.find_unseen_messages(SRC, [m.message_id for m in base])
     assert len(first) == len(base)
