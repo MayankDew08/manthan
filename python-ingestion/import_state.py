@@ -114,21 +114,21 @@ class ImportStateStore:
         source_id: str,
         source_type: str,
         file_name: str,
-        revision: str,
     ) -> None:
+        # Metadata only. The `revision` column is owned solely by
+        # update_source_revision and must advance only after a successful
+        # persistence run, never here at registration time.
         with self.connection:
             self.connection.execute(
                 """
                 INSERT INTO ingestion_sources
-                    (source_id, source_type, file_name, revision)
-                VALUES (?, ?, ?, ?)
+                    (source_id, source_type, file_name)
+                VALUES (?, ?, ?)
                 ON CONFLICT(source_id) DO UPDATE SET
                     source_type = excluded.source_type,
-                    file_name   = excluded.file_name,
-                    revision   = excluded.revision
-                WHERE revision != excluded.revision
+                    file_name   = excluded.file_name
                 """,
-                (source_id, source_type, file_name, revision),
+                (source_id, source_type, file_name),
             )
 
     def find_unseen_messages(
@@ -139,16 +139,22 @@ class ImportStateStore:
         if not message_ids:
             return []
 
-        placeholders = ",".join("?" for _ in message_ids)
-        rows = self.connection.execute(
-            f"""
-            SELECT message_id FROM processed_messages
-            WHERE source_id = ? AND message_id IN ({placeholders})
-            """,
-            [source_id, *message_ids],
-        ).fetchall()
+        # Chunk to stay under SQLite's host-parameter limit (default 999) for chats
+        # with more than ~1000 messages.
+        seen: set[str] = set()
+        batch_size = 500
+        for start in range(0, len(message_ids), batch_size):
+            batch = message_ids[start:start + batch_size]
+            placeholders = ",".join("?" for _ in batch)
+            rows = self.connection.execute(
+                f"""
+                SELECT message_id FROM processed_messages
+                WHERE source_id = ? AND message_id IN ({placeholders})
+                """,
+                [source_id, *batch],
+            ).fetchall()
+            seen.update(row["message_id"] for row in rows)
 
-        seen = {row["message_id"] for row in rows}
         return [mid for mid in message_ids if mid not in seen]
 
     def mark_processed(

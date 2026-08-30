@@ -109,7 +109,11 @@ class LinkScraper:
     def _scrape_web(self, url: str) -> ScrapeResult:
         """Render a page, expand content, extract text, and classify access blocks."""
         self.start()
-        context = self._browser.new_context(user_agent=UA, locale="en-US")
+        if self._browser is None:
+            return ScrapeResult(url=url, status="blocked",
+                                block_reason="browser_unavailable")
+        browser = self._browser
+        context = browser.new_context(user_agent=UA, locale="en-US")
         page = context.new_page()
         result = ScrapeResult(url=url)
         status = None
@@ -274,7 +278,12 @@ class LinkScraper:
     # ------------------------------------------------------------ x / twitter
 
     def _scrape_x(self, url: str) -> ScrapeResult:
-        context = self._browser.new_context(user_agent=UA, locale="en-US")
+        self.start()
+        if self._browser is None:
+            return ScrapeResult(url=url, status="blocked",
+                                block_reason="browser_unavailable")
+        browser = self._browser
+        context = browser.new_context(user_agent=UA, locale="en-US")
         page = context.new_page()
         result = ScrapeResult(url=url)
         status = None
@@ -396,10 +405,18 @@ class LinkScraper:
             print("[scraper] SUPADATA_API_KEY not set; cannot fall back to supadata")
             return None
         try:
-            from supadata import Supadata
+            from supadata import Supadata, Transcript
             sd = Supadata(api_key=key)
-            tr = sd.youtube.transcript(video_id=vid, text=True)
-            return (tr.content or "").strip() or None
+            tr = sd.transcript(url=f"https://www.youtube.com/watch?v={vid}",
+                               text=True)
+            if not isinstance(tr, Transcript):
+                return None
+            content = tr.content
+            if isinstance(content, list):
+                text = " ".join(getattr(c, "text", "") for c in content).strip()
+            else:
+                text = (content or "").strip()
+            return text or None
         except Exception as e:
             print(f"[scraper] supadata fallback failed for {vid}: {type(e).__name__}: {e}")
             return None

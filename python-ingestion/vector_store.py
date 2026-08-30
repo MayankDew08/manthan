@@ -5,7 +5,7 @@ import uuid
 from typing import Callable, List, Optional
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import Distance, VectorParams, PointStruct, Batch 
 
 from embedder import embed_batch, embed_text, embedding_dim
 
@@ -98,9 +98,9 @@ class VectorStore:
         texts = [item[1] for item in items]
         payloads = [item[2] for item in items]
         vectors = embed_batch(texts)
-        points = [PointStruct(id=pid, vector=vector, payload=payload)
-                  for pid, vector, payload in zip(ids, vectors, payloads)]
-        self.client.upsert(collection_name=self.collection, points=points)
+        self.client.upsert(collection_name=self.collection,
+                            points=Batch(ids=ids, vectors=vectors,
+                                         payloads=payloads))
 
     def search(self, query: str, limit: int = 10) -> list:
         """Return raw Qdrant hits for an embedded query."""

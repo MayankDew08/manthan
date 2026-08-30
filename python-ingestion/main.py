@@ -13,6 +13,7 @@ from typing import TypedDict
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph, START, END
+from langchain_core.runnables.config import RunnableConfig
 
 from parser import parse_chat
 from heuristic_filter import heuristic_filter
@@ -52,7 +53,7 @@ class ChatState(TypedDict, total=False):
 
 def parse_node(state):
     """Parse the export and remove records rejected by cheap heuristics."""
-    messages = parse_chat(state["chat_path"])
+    messages = parse_chat(state.get("chat_path", ""))
     kept, discarded = heuristic_filter(messages)
     reasons = {}
     for d in discarded:
@@ -67,7 +68,7 @@ def parse_node(state):
 
 def grade_pass1_node(state):
     """Assign initial quality scores and metadata to retained messages."""
-    graded = grade_messages(state["kept"])
+    graded = grade_messages(state.get("kept") or [])
     print("\n--- graded: pass 1 ---")
     for msg in graded:
         print(msg)
@@ -76,7 +77,7 @@ def grade_pass1_node(state):
 
 def grade_pass2_node(state):
     """Recheck borderline pass-one messages using neighboring context."""
-    verified = grade_pass2(state["graded"])
+    verified = grade_pass2(state.get("graded") or [])
     print("\n--- graded: pass 2 (re-graded quality=3 only) ---")
     for msg in verified:
         print(msg)
@@ -85,7 +86,7 @@ def grade_pass2_node(state):
 
 def scrape_candidates_node(state):
     """Scrape high-quality pass-one candidates while pass two runs in parallel."""
-    kept, graded = state["kept"], state["graded"]
+    kept, graded = state.get("kept") or [], state.get("graded") or []
     candidates = [(d, g) for d, g in zip(kept, graded)
                   if g.quality >= enrich.DEFAULT_MIN_QUALITY]
     print(f"\n[main] scraping {len(candidates)} pass-1 candidates "
@@ -97,8 +98,9 @@ def scrape_candidates_node(state):
 
 def merge_node(state):
     """Merge verified grades and identify newly promoted scrape candidates."""
-    final = enrich._merge_pass2(state["graded"], state["verified"])
-    promoted = [(d, g) for d, g, p1 in zip(state["kept"], final, state["graded"])
+    final = enrich._merge_pass2(state.get("graded") or [], state.get("verified") or [])
+    promoted = [(d, g) for d, g, p1 in zip(state.get("kept") or [], final,
+                                          state.get("graded") or [])
                 if p1.quality == 3 and g.quality >= enrich.DEFAULT_MIN_QUALITY]
     print("\n--- final: merged (quality overwritten by pass 2) ---")
     for msg in final:
@@ -113,8 +115,9 @@ def scrape_promoted_node(state):
     if not state.get("promoted"):
         return {}
     enriched, scraped, blocked, ask_user, stats, seen = enrich.process_candidates(
-        state["promoted"], seen=state["seen"], scraped=state["scraped"],
-        blocked=state["blocked"], enriched=state["enriched"], ask_user=state["ask_user"])
+        state.get("promoted") or [], seen=state.get("seen") or set(),
+        scraped=state.get("scraped") or [], blocked=state.get("blocked") or [],
+        enriched=state.get("enriched") or [], ask_user=state.get("ask_user") or [])
     merged = dict(state.get("stats", {}))
     for k, v in stats.items():
         merged[k] = merged.get(k, 0) + v
@@ -126,27 +129,27 @@ def persist_node(state):
     """Write final grades and link artifacts after both graph branches converge."""
     preview_backfill_keys = {
         (record.get("sent_at"), record.get("sender"), record.get("original_text"))
-        for record in state["enriched"]
+        for record in state.get("enriched") or []
         if record.get("links") and "link_previews" not in record
     }
     enriched = (
         enrich._attach_link_previews(
-            state["enriched"],
-            state["scraped"],
-            state["blocked"],
-            state["ask_user"],
+            state.get("enriched") or [],
+            state.get("scraped") or [],
+            state.get("blocked") or [],
+            state.get("ask_user") or [],
             preview_backfill_keys,
         )
         if preview_backfill_keys
-        else state["enriched"]
+        else state.get("enriched") or []
     )
-    enrich.save_list(enrich.GRADED_FILE, [asdict(m) for m in state["final"]])
-    enrich.save_list(enrich.SCRAPED_FILE, state["scraped"])
-    enrich.save_list(enrich.BLOCKED_FILE, state["blocked"])
-    enrich.save_list(enrich.ASK_USER_FILE, state["ask_user"])
+    enrich.save_list(enrich.GRADED_FILE, [asdict(m) for m in state.get("final") or []])
+    enrich.save_list(enrich.SCRAPED_FILE, state.get("scraped") or [])
+    enrich.save_list(enrich.BLOCKED_FILE, state.get("blocked") or [])
+    enrich.save_list(enrich.ASK_USER_FILE, state.get("ask_user") or [])
     enrich.save_list(enrich.ENRICHED_FILE, enriched)
     stats = state.get("stats", {})
-    print(f"\nSaved {len(state['final'])} messages to {enrich.GRADED_FILE}")
+    print(f"\nSaved {len(state.get('final') or [])} messages to {enrich.GRADED_FILE}")
     print(f"[main] done: {stats.get('scraped', 0)} scraped, {stats.get('blocked', 0)} blocked, "
           f"{stats.get('ask_user', 0)} ask-user, {stats.get('skipped_existing', 0)} existing, "
           f"{stats.get('no_links', 0)} candidates without links")
@@ -180,7 +183,7 @@ def build_graph(checkpointer=None):
 
 
 def run_pipeline(chat_path: str) -> dict:
-    from langchain_core.runnables.config import RunnableConfig
+    
     """Run or resume a chat-specific graph using a stable checkpoint thread ID."""
     thread = "manthan-" + hashlib.sha1(chat_path.encode("utf-8")).hexdigest()[:16]
     config = RunnableConfig({"configurable": {"thread_id": thread}})

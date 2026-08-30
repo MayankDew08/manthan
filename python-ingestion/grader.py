@@ -6,7 +6,7 @@ import os
 import tempfile
 import llm
 from dataclasses import asdict, dataclass
-from typing import List, Callable
+from typing import List, Callable, Any, cast
 
 from llm import (
     usage_stats, load_system_prompt, estimate_tokens, budget_for,
@@ -100,7 +100,7 @@ class GradeResult:
     original_text: str
 
 
-def _parse(item: dict, category_fallback: str = None) -> dict:
+def _parse(item: dict, category_fallback: str | None = None) -> dict:
     quality = item.get("quality")
     confidence = item.get("confidence")
     if quality is None or confidence is None:
@@ -205,12 +205,14 @@ def _make_user_content(batch) -> str:
 
 
 def grade_batch(batch: list, system_prompt: str, user_content: str,
-                category_fallback: List[str] = None,
+                category_fallback: List[str] | None = None,
                 max_tokens: int = COMPLETION_RESERVE,
                 disable_thinking: bool = GRADER_DISABLE_THINKING) -> List[GradeResult]:
     """Request and validate one ordered JSON grade for every batched message."""
-    data = llm.call_completion(system_prompt, user_content, max_tokens=max_tokens,
+    raw = llm.call_completion(system_prompt, user_content, max_tokens=max_tokens,
                                tag="grader", disable_thinking=disable_thinking)
+    
+    data = cast(List[dict[Any,Any]], raw)
     if len(data) != len(batch):
         raise ValueError(f"expected {len(batch)} grades, got {len(data)}")
     results = [

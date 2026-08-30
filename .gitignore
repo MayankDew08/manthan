@@ -37,6 +37,7 @@ data
 python-ingestion/metrics/last_run.json
 # Search evals can contain verbatim messages and derived private content.
 python-ingestion/evals/
+python-ingestion/secrets/
 
 # Logs / Temp
 *.log

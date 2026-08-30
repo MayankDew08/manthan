@@ -3,6 +3,9 @@
 __pycache__/
 *.pyc
 
+# Google Drive OAuth
+secrets/
+
 # Runtime checkpoints and message-derived artifacts may contain private data.
 *.sqlite*
 grading_checkpoint.json

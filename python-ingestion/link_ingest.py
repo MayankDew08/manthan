@@ -51,7 +51,7 @@ def list_ask_user() -> None:
     print(f"\n{len(pending)} unresolved. Use: link_ingest.py --ingest <#>")
 
 
-def ingest(index: int, file_path: str = None) -> None:
+def ingest(index: int, file_path: str| None) -> None:
     """Summarize pasted/file content and mark the selected request resolved."""
     items = load_list(ASK_USER_FILE)
     pending = sorted([i for i in items if not i.get("resolved")],

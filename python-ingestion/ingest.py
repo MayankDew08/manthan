@@ -14,10 +14,11 @@ import hashlib
 import os
 import sqlite3
 import threading
-from typing import Optional, TypedDict
+from typing import Optional
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph, START, END
+from langchain_core.runnables.config import RunnableConfig
 
 from dotenv import load_dotenv
 
@@ -65,7 +66,7 @@ def load_record_node(state: IngestState) -> dict:
 
 def grade_records_node(state: IngestState) -> dict:
     """Grade untrusted messages in one batch; trusted ones skip the LLM entirely."""
-    kept = state["kept"]
+    kept = state.get("kept") or []
     flags = state.get("trusted_flags") or [False] * len(kept)
     pending = [d for d, trusted in zip(kept, flags) if not trusted]
     results = iter(grade_messages(pending)) if pending else iter([])
@@ -90,7 +91,7 @@ def grade_records_node(state: IngestState) -> dict:
 
 def route_links(state: IngestState) -> str:
     """Scrape only when at least one passing candidate carries a link."""
-    for d, g in zip(state["kept"], state["graded"]):
+    for _, g in zip(state.get("kept") or [], state.get("graded") or []):
         if g.quality >= enrich.DEFAULT_MIN_QUALITY and extract_links(g.original_text):
             return "scrape"
     return "skip"
@@ -106,10 +107,10 @@ def build_records_node(state: IngestState) -> dict:
     enriched = list(state.get("enriched") or [])
     by_key = {(r.get("sent_at"), r.get("sender"), r.get("original_text")): r
               for r in enriched}
-    kept = state["kept"]
+    kept = state.get("kept") or []
     flags = state.get("trusted_flags") or [False] * len(kept)
     added = 0
-    for d, g, trusted in zip(kept, state["final"], flags):
+    for d, g, trusted in zip(kept, state.get("final") or [], flags):
         if g.quality < enrich.DEFAULT_MIN_QUALITY:
             continue
         key = (d.datetime_iso, d.sender, g.original_text)
@@ -142,7 +143,7 @@ def sync_stores_node(state: IngestState, config) -> dict:
     """Push graded messages, links, and pending links into Neo4j and Qdrant."""
     cfg = config.get("configurable") or {}
     summary = push_to_stores(
-        state["enriched"], state["scraped"], state.get("ask_user", []),
+        state.get("enriched") or [], state.get("scraped") or [], state.get("ask_user", []),
         MIN_QUALITY, blocked=state.get("blocked", []),
         store=cfg.get("store"), vs=cfg.get("vs"),
     )
@@ -152,7 +153,7 @@ def sync_stores_node(state: IngestState, config) -> dict:
 
 def _skip_scrape_node(state: IngestState) -> dict:
     """Emit empty link artifacts so persist sees the shape the scrape path produces."""
-    no_links = sum(1 for g in state["graded"]
+    no_links = sum(1 for g in state.get("graded") or []
                    if g.quality >= enrich.DEFAULT_MIN_QUALITY)
     return {
         "enriched": [],
@@ -233,8 +234,8 @@ def _invoke_graph(input_state: dict, thread_id: str,
     every path without ever being written into the checkpoint.
     """
     graph = _get_graph()
-    config = {"configurable": {"thread_id": thread_id,
-                               "store": store, "vs": vs}}
+    config = RunnableConfig({"configurable": {"thread_id": thread_id,
+                               "store": store, "vs": vs}})
     snap = graph.get_state(config)
     if snap is not None and getattr(snap, "next", None):
         print(f"[ingest] resuming thread {thread_id} "

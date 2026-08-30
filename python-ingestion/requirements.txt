@@ -30,6 +30,11 @@ requests>=2.34.2
 youtube-transcript-api>=1.2.4
 supadata>=1.6.0
 
+# Google API (Drive auth + client)
+google-api-python-client>=2.199.0
+google-auth-httplib2>=0.4.2
+google-auth-oauthlib>=1.4.1
+
 # Orchestration
 langgraph>=0.2
 langgraph-checkpoint-sqlite>=2.0.11
