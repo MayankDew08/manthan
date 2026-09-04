@@ -100,6 +100,16 @@ class ImportStateStore:
 
                     PRIMARY KEY (source_id, message_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS drive_sync_state (
+                    folder_id TEXT NOT NULL,
+                    account_id TEXT NOT NULL,
+                    page_token TEXT,
+                    updated_at TEXT,
+                    last_sync_at TEXT,
+                    last_error TEXT,
+                    PRIMARY KEY (folder_id, account_id)
+                );
             """)
             # Migrate DBs created before imported_at existed.
             try:
@@ -198,6 +208,37 @@ class ImportStateStore:
                 (revision,
                  datetime.datetime.now(datetime.timezone.utc).isoformat(),
                  source_id),
+            )
+
+    def get_drive_sync_state(self, account_id: str, folder_id: str) -> dict | None:
+        row = self.connection.execute(
+            "SELECT * FROM drive_sync_state WHERE account_id = ? AND folder_id = ?",
+            (account_id, folder_id),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_drive_sync_state(
+        self,
+        account_id: str,
+        folder_id: str,
+        page_token: str | None,
+        updated_at: str,
+        last_sync_at: str | None,
+        last_error: str | None,
+    ) -> None:
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT INTO drive_sync_state
+                    (folder_id, account_id, page_token, updated_at, last_sync_at, last_error)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(folder_id, account_id) DO UPDATE SET
+                    page_token   = excluded.page_token,
+                    updated_at   = excluded.updated_at,
+                    last_sync_at = excluded.last_sync_at,
+                    last_error   = excluded.last_error
+                """,
+                (folder_id, account_id, page_token, updated_at, last_sync_at, last_error),
             )
 
     def close(self) -> None:

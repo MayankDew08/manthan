@@ -1,0 +1,11 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AzureWebJobsStorage": "",
+    "DRIVE_CHANNEL_TOKEN": "your-channel-token",
+    "INSTALLATION_ID": "your-installation-id",
+    "SERVICE_BUS_NAMESPACE": "your-service-bus-namespace",
+    "SERVICE_BUS_QUEUE": "your-service-bus-queue"
+  }
+}

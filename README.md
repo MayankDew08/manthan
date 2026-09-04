@@ -46,7 +46,8 @@ These measurements describe one local run, not a benchmark across hardware or mo
 
 ## Repository layout
 
-- `python-ingestion/`: parser, grading, enrichment, storage, API, scripts, and tests
+- `python-ingestion/`: parser, grading, enrichment, storage, API, Drive sync (`drive_changes.py`, `drive_watch.py`, `drive_event_listener.py`), scripts, and tests
+- `drive-relay/`: Azure Function relay (`relay.py`, `publisher.py`, `function_app.py`) that turns Google Drive push notifications into Service Bus events, plus its tests
 - `golang-telegram/`: optional Telegram-to-Redis bridge
 - `docker-compose.yaml`: local Neo4j, Qdrant, and Redis services
 - `python-ingestion/metrics/`: redacted public reports generated from local runs
@@ -59,6 +60,7 @@ These measurements describe one local run, not a benchmark across hardware or mo
 4. `enrich.py` and `link_scraper.py` retrieve and summarize linked resources.
 5. `store.py` and `vector_store.py` write to Neo4j and Qdrant.
 6. `app.py` exposes the stored knowledge through HTTP endpoints.
+7. Drive automatic ingestion: `drive_watch.py` registers a Google `changes.watch` channel; Google pushes to the `drive-relay` Function (`relay.py` validates, `publisher.py` sends to Service Bus); `drive_event_listener.py` receives the event and calls `notify_drive_change()`; `drive_changes.py` fetches unseen changes and `run_incremental_import()` ingests only new messages.
 
 ![Manthan system architecture](docs/assets/system-architecture.png)
 
@@ -82,6 +84,7 @@ git clone https://github.com/MayankDew08/manthan.git
 cd Manthan
 cp .env.example .env
 cp python-ingestion/.env.example python-ingestion/.env
+cp drive-relay/local.settings.example.json drive-relay/local.settings.json
 ```
 
 Edit `.env` and set `NEO4J_PASSWORD` to a new local password. Then edit `python-ingestion/.env` and set:
@@ -195,6 +198,48 @@ Only the configured Telegram user ID is accepted by the bot. Telegram messages n
 make dbs-down
 ```
 
+## Drive automatic ingestion
+
+WhatsApp exports stored as ZIPs in a Google Drive folder can be ingested automatically. Google notifies the relay, the relay wakes the local listener, and only unseen messages enter the pipeline. The Drive folder ID stays local; the public relay only carries channel metadata.
+
+### Configure
+
+Set these in `python-ingestion/.env` (all local, never committed):
+
+| Variable | Purpose |
+| --- | --- |
+| `DRIVE_FOLDER_ID` | Google Drive folder holding the export ZIPs (from the folder URL) |
+| `DRIVE_CHANNEL_TOKEN` | Secret shared with Google `changes.watch` and the relay Function |
+| `INSTALLATION_ID` | Stable ID of this laptop/agent (for example `manthan-mayank-01`) |
+| `SERVICE_BUS_NAMESPACE` / `SERVICE_BUS_QUEUE` | Azure Service Bus endpoint and queue |
+| `MANTHAN_IMPORT_DB` | Local SQLite state file (`import_state.sqlite`) |
+| `DRIVE_LISTENER_DRY_RUN` | `true` prints notifications without running Drive sync or Gemma |
+
+Copy `drive-relay/local.settings.example.json` to `drive-relay/local.settings.json` for local Function runs. The real `DRIVE_CHANNEL_TOKEN` lives only in Azure app settings, never in the repo.
+
+### Run the change tracker manually
+
+```bash
+cd python-ingestion
+uv run python drive_changes.py init    # save the Drive page token once
+uv run python drive_changes.py check   # report relevant changed ZIPs, advance position
+uv run python drive_watch.py create    # register the Google push channel
+uv run python drive_watch.py status    # inspect the stored watch record
+uv run python drive_event_listener.py  # receive Service Bus events and sync
+```
+
+`sync_import_relevant_changes()` downloads each relevant ZIP, extracts the single `.txt` export, and calls `run_incremental_import()`, which processes only unseen messages (same-revision exports are skipped without LLM calls). The page token advances only after every file in a batch succeeds; on failure the old token is retained and the error recorded, so retries skip already-imported work via revision and message-ID checks.
+
+### Tests
+
+```bash
+cd python-ingestion
+uv run pytest tests/test_drive_changes.py tests/test_drive_watch.py tests/test_drive_event_listener.py -q
+
+cd ../drive-relay
+uv run pytest tests -q   # relay validation, publishers, Function wrapper (all mocked, no Azure needed)
+```
+
 ## Development
 
 Run the existing offline Python suite and the Go checks:
@@ -215,6 +260,7 @@ When contributing, keep changes focused, add tests for behavior changes, avoid c
 - LLM inference is local when `LLAMA_BASE_URL` points to a local server.
 - Link enrichment contacts external websites and may use optional configured APIs.
 - Raw chats, derived records, checkpoints, local databases, tokens, and environment files must remain untracked.
+- The Google Drive channel token lives only in Azure app settings and local `local.settings.json` (both ignored); it is never logged, stored in SQLite, or returned in relay events.
 - The checked-in metrics report contains aggregate values only and uses a redacted source label.
 - The API has no built-in auth; keep it on `127.0.0.1` unless you add your own access control.
 - Rotate any credential immediately if it is ever committed or shared.
