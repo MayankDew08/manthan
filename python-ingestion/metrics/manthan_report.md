@@ -93,3 +93,45 @@ _generated 2026-08-18 09:44 UTC_
 **Qdrant:**
 - points: 16
 - vectors: 384
+
+---
+
+# Appendix A — Final sender-free re-ingest (2026-10-03)
+
+_Sender-free pipeline (`remove-sender`): message identity, Neo4j/Qdrant schemas,
+API, workers and Go bridge carry no sender; `Person` nodes and `SENT` edges removed.
+Sections 1–7 above (2026-08-18 run) are preserved unchanged._
+
+## A.1 Files ingested
+
+Two Drive ZIPs sharing one display name (distinct file IDs); four other tracked
+files skipped as unchanged (revision match, zero Gemma calls):
+
+| File | Parsed | Kept | Dropped | Low quality | Stored |
+|---|---|---|---|---|---|
+| export A (358 msgs) | 358 | 340 | 18 (`media_only_no_caption`) | 233 | 107 |
+| export B (316 msgs) | 316 | 301 | 15 (`media_only_no_caption`) | 203 | 98 |
+| **Run total** | **674** | **641** | **33** | **436** | **205** |
+
+Final-file quality distribution (301 grades): q1 **120** / q2 **66** / q3 **17** / q4 **70** / q5 **28**.
+
+## A.2 Grading batches and retries
+
+- Pass 1: 68 + 61 batches, max 5/batch, 25717-token budget; **58 batches resumed
+  from checkpoint (0 LLM calls)**.
+- One batch returned 10 grade objects for 5 messages and was retried with an
+  explicit count reminder before succeeding (`grade_batch` retry, max 3 attempts).
+- Pass 2 re-graded quality-3 messages one at a time as in the original run.
+
+## A.3 Tokens (process-cumulative, both files)
+
+- Pass 1: 217 LLM calls, 357323 in / 30022 out (387345 total)
+- Pass 1+2: 282 LLM calls, 406971 in / 34949 out (441920 total)
+- Run total incl. summaries: **287 LLM calls, 444366 total tokens**
+
+## A.4 Cumulative store state after this run
+
+- SQLite: **1017** processed rows (51 dropped / 658 low-quality / 308 stored),
+  **6/6** sources revisioned; page tokens and watch rows preserved.
+- **Neo4j:** 145 Messages, 68 Links, **0 Persons, 0 SENT edges, 0 sender props**.
+- **Qdrant** (`manthan-fresh`, 384-dim cosine): **144 points**, status green.
