@@ -146,8 +146,8 @@ def run_all():
         print("\n--- untrusted message with link runs the full pipeline ---")
         before = len(calls)
         r1 = ingest.ingest_message("Check this https://example.com/article",
-                                   sender="Alice", sent_at="2026-01-01T10:00:00",
-                                   store=store, vs=vs)
+                                    sent_at="2026-01-01T10:00:00",
+                                    store=store, vs=vs)
         new = calls[before:]
         check("graded once via llm", new.count("grader") == 1, new)
         check("message enriched", new.count("enhancer") >= 1)
@@ -170,8 +170,8 @@ def run_all():
         print("\n--- message without links bypasses scraping ---")
         before = len(calls)
         r2 = ingest.ingest_message("Pure text insight about retrieval",
-                                   sender="Bob", sent_at="2026-01-01T10:05:00",
-                                   store=store, vs=vs)
+                                    sent_at="2026-01-01T10:05:00",
+                                    store=store, vs=vs)
         new = calls[before:]
         check("graded but never summarized",
               new.count("grader") == 1 and "summarizer" not in new, new)
@@ -190,8 +190,8 @@ def run_all():
         print("\n--- trusted messages skip grading but still scrape ---")
         graders_before = sum(1 for t in calls if t == "grader")
         r3 = ingest.ingest_message("Trusted note https://example.com/trusted",
-                                   sender="Cara", sent_at="2026-01-01T10:10:00",
-                                   trusted=True, store=store, vs=vs)
+                                    sent_at="2026-01-01T10:10:00",
+                                    trusted=True, store=store, vs=vs)
         graders_after = sum(1 for t in calls if t == "grader")
         check("zero grader calls when trusted",
               graders_after == graders_before)
@@ -205,8 +205,8 @@ def run_all():
 
         print("\n--- paywall links land in ask-user pending paste ---")
         r4 = ingest.ingest_message("Read https://example.com/paywall-article",
-                                   sender="Dan", sent_at="2026-01-01T10:15:00",
-                                   store=store, vs=vs)
+                                    sent_at="2026-01-01T10:15:00",
+                                    store=store, vs=vs)
         out4 = r4["link_outcomes"][0]
         check("ask_user outcome with reason",
               out4["status"] == "ask_user" and out4["block_reason"] == "paywall",
@@ -217,8 +217,8 @@ def run_all():
 
         print("\n--- hard-blocked links sync with their reason ---")
         r5 = ingest.ingest_message("Big page https://example.com/heavy-page",
-                                   sender="Hank", sent_at="2026-01-01T10:18:00",
-                                   store=store, vs=vs)
+                                    sent_at="2026-01-01T10:18:00",
+                                    store=store, vs=vs)
         out5 = r5["link_outcomes"][0]
         check("blocked outcome with reason",
               out5["status"] == "blocked"
@@ -288,8 +288,8 @@ def run_all():
         print("\n--- identical retry reuses the completed checkpoint ---")
         total_before = len(calls)
         r1b = ingest.ingest_message("Check this https://example.com/article",
-                                    sender="Alice", sent_at="2026-01-01T10:00:00",
-                                    store=store, vs=vs)
+                                     sent_at="2026-01-01T10:00:00",
+                                     store=store, vs=vs)
         check("no llm calls on completed-thread retry",
               len(calls) == total_before, f"{total_before} -> {len(calls)}")
         check("replayed result matches original",
@@ -306,15 +306,14 @@ def run_all():
         enrich.GRADED_FILE = str(s7 / "graded.json")
         link_ingest.ASK_USER_FILE = enrich.ASK_USER_FILE
         store7, vs7 = FakeStore(), FakeVS()
-        args7 = dict(sender="Fay", sent_at="2026-01-01T10:25:00",
+        args7 = dict(sent_at="2026-01-01T10:25:00",
                      text="Crash test https://example.com/crash")
         graders_before = sum(1 for t in calls if t == "grader")
         CRASH["summarizer"] = True
         raised = False
         try:
             ingest.ingest_message(args7["text"], store=store7, vs=vs7,
-                                  sender=args7["sender"],
-                                  sent_at=args7["sent_at"])
+                                   sent_at=args7["sent_at"])
         except RuntimeError as exc:
             raised = "simulated crash" in str(exc)
         CRASH["summarizer"] = False
@@ -326,7 +325,6 @@ def run_all():
               graders_mid == graders_before + 1,
               f"{graders_before} -> {graders_mid}")
         r7 = ingest.ingest_message(args7["text"], store=store7, vs=vs7,
-                                   sender=args7["sender"],
                                    sent_at=args7["sent_at"])
         graders_final = sum(1 for t in calls if t == "grader")
         check("resume does not re-grade (invoke(None))",
@@ -361,22 +359,22 @@ def run_all():
                 super().upsert_message(m)
 
         store8, vs8 = FakeStore(), FlakyVS()
-        args8 = dict(sender="Gus", sent_at="2026-01-01T10:30:00",
+        args8 = dict(sent_at="2026-01-01T10:30:00",
                      text="Sync crash test https://example.com/sync")
         graders_before = sum(1 for t in calls if t == "grader")
         summarizers_before = sum(1 for t in calls if t == "summarizer")
         raised = False
         try:
-            ingest.ingest_message(args8["text"], sender=args8["sender"],
-                                  sent_at=args8["sent_at"],
-                                  store=store8, vs=vs8)
+            ingest.ingest_message(args8["text"],
+                                   sent_at=args8["sent_at"],
+                                   store=store8, vs=vs8)
         except RuntimeError as exc:
             raised = "simulated sync crash" in str(exc)
         check("sync crash propagates out of ingest_message", raised)
         check("neo4j write landed before qdrant crashed",
               len(store8.messages) == 1 and len(vs8.msgs) == 0,
               f"msgs={len(store8.messages)} vec={len(vs8.msgs)}")
-        r8 = ingest.ingest_message(args8["text"], sender=args8["sender"],
+        r8 = ingest.ingest_message(args8["text"],
                                    sent_at=args8["sent_at"],
                                    store=store8, vs=vs8)
         graders_after = sum(1 for t in calls if t == "grader")

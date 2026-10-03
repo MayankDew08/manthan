@@ -16,7 +16,7 @@ _STOP = {
     "it", "with", "you", "do", "does", "did", "can", "could", "would", "should",
 }
 
-_MESSAGE_PROPS = ("sender", "sent_at", "text", "quality", "link_intent",
+_MESSAGE_PROPS = ("sent_at", "text", "quality", "link_intent",
                   "entities", "topics")
 
 MIN_SCORE = 0.25
@@ -40,8 +40,8 @@ def _qdrant_pass(payload: dict, topics: Optional[List[str]],
     return True
 
 
-def _message_key(sender, sent_at, text):
-    return ("m", sender, sent_at, text)
+def _message_key(sent_at, text):
+    return ("m", sent_at, text)
 
 
 def _link_key(url):
@@ -52,7 +52,6 @@ def _message_result(props: dict, score: float, source: str,
                     related_links: Optional[list] = None) -> dict:
     return {
         "type": "message",
-        "sender": props.get("sender", ""),
         "sent_at": props.get("sent_at", ""),
         "text": props.get("text", ""),
         "topics": props.get("topics") or [],
@@ -68,7 +67,6 @@ def _link_result(payload: dict, score: float, source: str,
     attribution = attribution or {}
     return {
         "type": "link",
-        "sender": attribution.get("sender", ""),
         "sent_at": attribution.get("sent_at", ""),
         "text": payload.get("summary", ""),
         "title": payload.get("title", ""),
@@ -108,7 +106,7 @@ def search(query: str, *, topics: Optional[List[str]] = None,
             if not _qdrant_pass(p, topics, min_quality):
                 continue
             if p.get("type") == "message":
-                key = _message_key(p.get("sender"), p.get("sent_at"), p.get("text"))
+                key = _message_key(p.get("sent_at"), p.get("text"))
                 seen.add(key)
                 results.append(_message_result(p, hit.score, "semantic",
                                                related_links=_related_links(store, p)))
@@ -128,7 +126,7 @@ def search(query: str, *, topics: Optional[List[str]] = None,
                                               graph_scale)
             for res in graph_results:
                 if res["type"] == "message":
-                    key = _message_key(res["sender"], res["sent_at"], res["text"])
+                    key = _message_key(res["sent_at"], res["text"])
                 else:
                     key = _link_key(res["url"])
                 if key not in seen:
@@ -169,11 +167,10 @@ def _related_links(store: KnowledgeStore, props: dict) -> list:
     with store.driver.session() as session:
         rows = session.run(
             """
-            MATCH (m:Message {sender: $sender, sent_at: $sent_at, text: $text})
+            MATCH (m:Message {sent_at: $sent_at, text: $text})
             OPTIONAL MATCH (m)-[:CONTAINS]->(l:Link)
             RETURN l.url AS url, l.title AS title
             """,
-            sender=props.get("sender", ""),
             sent_at=props.get("sent_at", ""),
             text=props.get("text", ""),
         ).data()
@@ -187,13 +184,13 @@ def _link_attribution(store: KnowledgeStore, payload: dict) -> dict:
         row = session.run(
             """
             MATCH (m:Message)-[:CONTAINS]->(l:Link {url: $url})
-            RETURN m.sender AS sender, m.sent_at AS sent_at
+            RETURN m.sent_at AS sent_at
             ORDER BY m.sent_at
             LIMIT 1
             """,
             url=payload.get("url", ""),
         ).single()
-    return {"sender": row["sender"], "sent_at": row["sent_at"]} if row else {}
+    return {"sent_at": row["sent_at"]} if row else {}
 
 
 def _graph_candidates(store: KnowledgeStore, terms: List[str],

@@ -114,7 +114,7 @@ def _attach_link_previews(enriched, scraped, blocked, ask_user, current_keys):
                 for url in record.get("links", [])
             ],
         }
-        if (record.get("sent_at"), record.get("sender"),
+        if (record.get("sent_at"),
             record.get("original_text")) in current_keys
         else record
         for record in enriched
@@ -166,7 +166,7 @@ def refresh_summaries(max_workers: int = MAX_WORKERS) -> None:
     blocked = load_list(BLOCKED_FILE)
     ask_user = load_list(ASK_USER_FILE)
     preview_keys = {
-        (record.get("sent_at"), record.get("sender"), record.get("original_text"))
+        (record.get("sent_at"), record.get("original_text"))
         for record in enriched
         if any(url in refreshed_urls for url in record.get("links", []))
     }
@@ -226,11 +226,11 @@ def process_candidates(candidates, *, force: bool = False, no_scrape: bool = Fal
     # The files are cumulative across chats. Replace only the current messages,
     # keeping previews on historical rows as immutable snapshots.
     candidate_keys = {
-        (data.datetime_iso, data.sender, grade.original_text)
+        (data.datetime_iso, grade.original_text)
         for data, grade in candidates
     }
     enriched = [record for record in enriched
-                if (record.get("sent_at"), record.get("sender"),
+                if (record.get("sent_at"),
                     record.get("original_text")) not in candidate_keys]
 
     stats = {"scraped": 0, "blocked": 0, "ask_user": 0,
@@ -244,12 +244,12 @@ def process_candidates(candidates, *, force: bool = False, no_scrape: bool = Fal
             continue
         en = enhancer.enrich_message(g.original_text, links)
         enriched.append({
-            "sent_at": d.datetime_iso, "sender": d.sender, "quality": g.quality,
+            "sent_at": d.datetime_iso, "quality": g.quality,
             "original_text": g.original_text, "links": links,
             "link_intent": en["link_intent"], "entities": en["entities"],
             "topics": en["topics"],
         })
-        ctx = {"sender": d.sender, "sent_at": d.datetime_iso,
+        ctx = {"sent_at": d.datetime_iso,
                "original_text": g.original_text, "link_intent": en["link_intent"]}
         for url in links:
             if url in seen:

@@ -8,7 +8,6 @@ import re
 class Data:
     """Single parsed chat message before grading and enrichment."""
     datetime_iso : str
-    sender : str
     text : str
     is_media : bool
 
@@ -45,13 +44,13 @@ def parse_chat(file_path: str) -> list[Data]:
                 date_str, time_str = match.groups()
                 rest = line[match.end():]
                 if ": " in rest:
-                    sender, text = rest.split(": ", 1)
-                    sender = sender.strip()
+                    # WhatsApp header format is "sender: text" — the sender
+                    # prefix is structural and discarded (content-only KB).
+                    _, text = rest.split(": ", 1)
                 else:
-                    continue
+                    text = rest
                 messages.append(Data(
                     parse_datetime(date_str, time_str).isoformat(),
-                    sender,
                     text,
                     "<Media omitted>" in text,
                 ))

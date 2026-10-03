@@ -176,8 +176,7 @@ def run_all():
                                "resolved": True}
         historical_enriched = {
             "sent_at": "2020-01-01T00:00:00",
-            "sender": "Historical Sender",
-            # Identical text is valid across different chats. Sender + timestamp own the
+            # Identical text is valid across different chats. Timestamp + text own the
             # row, so this must survive a force refresh of the current chat.
             "original_text": enriched[0]["original_text"],
             "links": ["https://github.com/qdrant/qdrant"],
@@ -208,7 +207,6 @@ def run_all():
               all(x.get("summary") for x in scraped3))
         historical_enriched_preserved = any(
             r.get("sent_at") == historical_enriched["sent_at"]
-            and r.get("sender") == historical_enriched["sender"]
             and r.get("original_text") == historical_enriched["original_text"]
             and r.get("link_previews") == historical_enriched["link_previews"]
             for r in enriched3

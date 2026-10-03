@@ -1,7 +1,7 @@
 """Centralized checkpointed ingestion graph for single-message ingestion.
 
 Composes the LangGraph workflow from ``main.py`` behind one entrypoint that
-accepts a single Telegram message: grading (skipped for trusted senders),
+accepts a single Telegram message: grading (skipped for trusted messages),
 conditional link scraping, LLM summarization, record building for linkless
 messages, artifact persistence, and a final sync into Neo4j and Qdrant. The
 graph is built once per process and every invocation is checkpointed, so a
@@ -51,7 +51,6 @@ def load_record_node(state: IngestState) -> dict:
     kept = [
         Data(
             datetime_iso=r.get("sent_at") or "",
-            sender=r.get("sender") or "",
             text=(r.get("text") or "").strip(),
             is_media=False,
         )
@@ -105,7 +104,7 @@ def route_promoted(state: IngestState) -> str:
 def build_records_node(state: IngestState) -> dict:
     """Synthesize Message records for passing messages that carry no links."""
     enriched = list(state.get("enriched") or [])
-    by_key = {(r.get("sent_at"), r.get("sender"), r.get("original_text")): r
+    by_key = {(r.get("sent_at"), r.get("original_text")): r
               for r in enriched}
     kept = state.get("kept") or []
     flags = state.get("trusted_flags") or [False] * len(kept)
@@ -113,7 +112,7 @@ def build_records_node(state: IngestState) -> dict:
     for d, g, trusted in zip(kept, state.get("final") or [], flags):
         if g.quality < enrich.DEFAULT_MIN_QUALITY:
             continue
-        key = (d.datetime_iso, d.sender, g.original_text)
+        key = (d.datetime_iso, g.original_text)
         row = by_key.get(key)
         if row is not None:
             row["trusted"] = trusted
@@ -121,7 +120,6 @@ def build_records_node(state: IngestState) -> dict:
         en = enhancer.enrich_message(g.original_text)
         record = {
             "sent_at": d.datetime_iso,
-            "sender": d.sender,
             "quality": g.quality,
             "original_text": g.original_text,
             "links": [],
@@ -247,8 +245,8 @@ def _invoke_graph(input_state: dict, thread_id: str,
     return graph.invoke(input_state, config=config)
 
 
-def _message_thread_id(sender: str, sent_at: str, text: str) -> str:
-    digest = hashlib.sha1(f"{sender}|{sent_at}|{text}".encode("utf-8")).hexdigest()
+def _message_thread_id(sent_at: str, text: str) -> str:
+    digest = hashlib.sha1(f"{sent_at}|{text}".encode("utf-8")).hexdigest()
     return f"msg-{digest[:16]}"
 
 
@@ -264,7 +262,7 @@ def _link_outcomes(row: dict) -> list:
     return outcomes
 
 
-def ingest_message(text: str, sender: str = "", sent_at: Optional[str] = None,
+def ingest_message(text: str, sent_at: Optional[str] = None,
                    trusted: bool = False,
                    store=None, vs=None) -> dict:
     """Run the full pipeline for one bot message and persist the results."""
@@ -274,18 +272,17 @@ def ingest_message(text: str, sender: str = "", sent_at: Optional[str] = None,
     sent_at = sent_at or dt.datetime.now(dt.timezone.utc).isoformat()
     record = {
         "text": text,
-        "sender": sender or "",
         "sent_at": sent_at,
         "trusted": bool(trusted),
     }
-    thread_id = _message_thread_id(record["sender"], sent_at, text)
+    thread_id = _message_thread_id(sent_at, text)
     state = _invoke_graph({"records": [record]}, thread_id,
                           store=store, vs=vs)
 
     row = next(
         (r for r in state.get("enriched", [])
-         if (r.get("sent_at"), r.get("sender"), r.get("original_text"))
-         == (sent_at, record["sender"], text)),
+         if (r.get("sent_at"), r.get("original_text"))
+         == (sent_at, text)),
         None,
     ) or {}
     final = state.get("final") or []
@@ -294,7 +291,6 @@ def ingest_message(text: str, sender: str = "", sent_at: Optional[str] = None,
     return {
         "ok": True,
         "message": {
-            "sender": record["sender"],
             "sent_at": sent_at,
             "quality": quality,
             "trusted": bool(trusted),

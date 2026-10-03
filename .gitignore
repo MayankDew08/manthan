@@ -42,6 +42,7 @@ secrets/
 token.json
 credentials.json
 local.settings.json
+.env.main
 
 # Logs / Temp
 *.log

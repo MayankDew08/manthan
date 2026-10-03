@@ -53,18 +53,15 @@ class KnowledgeStore:
 
     @staticmethod
     def _add_message_tx(tx, msg):
-        sender = msg.get("sender") or ""
         sent_at = msg.get("sent_at") or msg.get("datetime_iso") or ""
         text = msg.get("original_text") or ""
         tx.run(
             """
-            MERGE (p:Person {name: $sender})
-            MERGE (m:Message {sent_at: $sent_at, sender: $sender, text: $text})
+            MERGE (m:Message {sent_at: $sent_at, text: $text})
             ON CREATE SET m.quality = $quality, m.link_intent = $link_intent,
                 m.entities = $entities, m.topics = $topics, m.trusted = $trusted
             ON MATCH SET m.quality = $quality, m.link_intent = $link_intent,
                 m.entities = $entities, m.topics = $topics, m.trusted = $trusted
-            MERGE (p)-[:SENT]->(m)
             WITH m
             FOREACH (name IN $entities |
                 MERGE (e:Entity {name: name})
@@ -78,7 +75,6 @@ class KnowledgeStore:
             ON CREATE SET l.title = link.title
             MERGE (m)-[:CONTAINS]->(l)
             """,
-            sender=sender,
             sent_at=sent_at,
             text=text,
             quality=msg.get("quality"),
@@ -123,7 +119,7 @@ class KnowledgeStore:
                 MERGE (t:Topic {name: name})
                 MERGE (l)-[:ABOUT]->(t))
             WITH l
-            MATCH (m:Message {sender: $sender, sent_at: $msg_sent_at, text: $text})
+            MATCH (m:Message {sent_at: $msg_sent_at, text: $text})
             MERGE (m)-[:CONTAINS]->(l)
             """,
             url=url,
@@ -140,7 +136,6 @@ class KnowledgeStore:
             sent_at=link.get("sent_at") or "",
             entities=link.get("entities") or [],
             topics=link.get("topics") or [],
-            sender=ctx.get("sender") or "",
             msg_sent_at=ctx.get("sent_at") or "",
             text=ctx.get("original_text") or "",
             status=status,

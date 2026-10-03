@@ -128,7 +128,7 @@ def scrape_promoted_node(state):
 def persist_node(state):
     """Write final grades and link artifacts after both graph branches converge."""
     preview_backfill_keys = {
-        (record.get("sent_at"), record.get("sender"), record.get("original_text"))
+        (record.get("sent_at"), record.get("original_text"))
         for record in state.get("enriched") or []
         if record.get("links") and "link_previews" not in record
     }

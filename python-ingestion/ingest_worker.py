@@ -67,7 +67,6 @@ def call_ingest_api(payload: dict) -> dict:
             "job_id": payload.get("job_id"),
             "telegram_update_id": payload.get("telegram_update_id"),
             "chat_id": payload.get("chat_id"),
-            "sender_name": payload.get("sender_name", ""),
             "text": payload["text"],
             "telegram_message_id": payload.get("telegram_message_id"),
             "skip_grading": payload.get("skip_grading", False),
