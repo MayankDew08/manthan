@@ -204,28 +204,50 @@ def _make_user_content(batch) -> str:
     )
 
 
+GRADE_MAX_ATTEMPTS = 3
+
+
 def grade_batch(batch: list, system_prompt: str, user_content: str,
                 category_fallback: List[str] | None = None,
                 max_tokens: int = COMPLETION_RESERVE,
                 disable_thinking: bool = GRADER_DISABLE_THINKING) -> List[GradeResult]:
-    """Request and validate one ordered JSON grade for every batched message."""
-    raw = llm.call_completion(system_prompt, user_content, max_tokens=max_tokens,
-                               tag="grader", disable_thinking=disable_thinking)
-    
-    data = cast(List[dict[Any,Any]], raw)
-    if len(data) != len(batch):
-        raise ValueError(f"expected {len(batch)} grades, got {len(data)}")
-    results = [
-        GradeResult(
-            quality=p["quality"], confidence=p["confidence"],
-            category=p["category"], reason=p["reason"],
-            topics=p["topics"], original_text=_msg_text(batch[i]),
-        )
-        for i, item in enumerate(data)
-        for p in [_parse(item, category_fallback[i] if category_fallback else None)]
-    ]
-    print(f"[grader] got {len(results)} grades")
-    return results
+    """Request and validate one ordered JSON grade for every batched message.
+
+    Transient model-compliance slips (wrong object count, missing fields) are
+    retried with an explicit count reminder; persistent failure still raises
+    so misaligned outcomes can never silently pass.
+    """
+    content = user_content
+    err: ValueError | None = None
+    for attempt in range(1, GRADE_MAX_ATTEMPTS + 1):
+        raw = llm.call_completion(system_prompt, content, max_tokens=max_tokens,
+                                   tag="grader", disable_thinking=disable_thinking)
+
+        data = cast(List[dict[Any,Any]], raw)
+        try:
+            if len(data) != len(batch):
+                raise ValueError(f"expected {len(batch)} grades, got {len(data)}")
+            results = [
+                GradeResult(
+                    quality=p["quality"], confidence=p["confidence"],
+                    category=p["category"], reason=p["reason"],
+                    topics=p["topics"], original_text=_msg_text(batch[i]),
+                )
+                for i, item in enumerate(data)
+                for p in [_parse(item, category_fallback[i] if category_fallback else None)]
+            ]
+        except (ValueError, KeyError, TypeError) as e:
+            err = e if isinstance(e, ValueError) else ValueError(str(e))
+            print(f"[grader] invalid batch response ({attempt}/{GRADE_MAX_ATTEMPTS}): {err}")
+            content = (
+                user_content
+                + f"\n\nREMINDER: reply with EXACTLY {len(batch)} JSON objects, "
+                "one per message, in order. No markdown, no commentary."
+            )
+            continue
+        print(f"[grader] got {len(results)} grades")
+        return results
+    raise err if err is not None else ValueError("grade_batch failed without response")
 
 
 def grade_messages(messages: list) -> List[GradeResult]:
