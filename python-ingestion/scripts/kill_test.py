@@ -43,7 +43,7 @@ def main():
             kind = f"[{r['type']}]".ljust(8)
             title = r.get("title") or r.get("text", "")[:60]
             print(f"  {kind} {r['score']:.3f} {r['source']:<9} "
-                  f"{r.get('sender', '')} | {r.get('sent_at', '')[:16]} | {title[:70]}")
+                  f"{r.get('sent_at', '')[:16]} | {title[:70]}")
             if r.get("related_links"):
                 for lk in r["related_links"][:2]:
                     print(f"        -> link: {lk['title'] or lk['url']}")

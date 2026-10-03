@@ -36,7 +36,7 @@ def _serialize_messages(messages, path: str) -> None:
             dt = _dt.datetime.fromisoformat(d.datetime_iso)
             head = dt.strftime("%d/%m/%Y, %I:%M:%S %p")
             parts = d.text.split("\n")
-            f.write(f"{head} - {d.sender}: {parts[0]}\n")
+            f.write(f"{head} - {parts[0]}\n")
             for extra in parts[1:]:
                 f.write(extra + "\n")
 

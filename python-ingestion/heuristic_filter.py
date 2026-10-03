@@ -49,7 +49,6 @@ def heuristic_filter(messages: List[Data]) -> Tuple[List[Data], List[Dict]]:
         if reason:
             discarded.append({
                 "timestamp": msg.datetime_iso,
-                "sender": msg.sender,
                 "text": text[:200],
                 "reason": reason,
                 "stage": "heuristic"

@@ -47,7 +47,6 @@ type IngestJob struct {
 	TelegramUpdateID  int       `json:"telegram_update_id"`
 	Type              string    `json:"type"`
 	ChatID            int64     `json:"chat_id"`
-	SenderName        string    `json:"sender_name"`
 	Text              string    `json:"text"`
 	LinkID            string    `json:"link_id"`
 	TelegramMessageID int64     `json:"telegram_message_id"`
@@ -115,9 +114,8 @@ func handleUpdate(ctx context.Context, update TelegramUpdate, queue *Queue) erro
 			JobID:             fmt.Sprintf("%d", time.Now().UnixNano()),
 			TelegramUpdateID:  update.UpdateID,
 			Type:              "paste",
-			ChatID:            update.Message.Chat.ID,
-			SenderName:        resolveSender(update.Message.From, ""),
-			Text:              content,
+		ChatID:            update.Message.Chat.ID,
+		Text:              content,
 			LinkID:            linkID,
 			TelegramMessageID: update.Message.MessageID,
 			SkipGrading:       true,
@@ -176,13 +174,12 @@ func handleUpdate(ctx context.Context, update TelegramUpdate, queue *Queue) erro
 		log.Println("published start job:", job.JobID)
 	} else {
 		content, skip := parseIngest(update.Message.Text)
-		via, content := parseVia(content)
+		_, content = parseVia(content)
 		job := IngestJob{
 			JobID:             fmt.Sprintf("%d", time.Now().UnixNano()),
 			TelegramUpdateID:  update.UpdateID,
 			Type:              "ingest",
 			ChatID:            update.Message.Chat.ID,
-			SenderName:        resolveSender(update.Message.From, via),
 			Text:              content,
 			TelegramMessageID: update.Message.MessageID,
 			SkipGrading:       skip,
@@ -270,7 +267,8 @@ func parseIngest(text string) (content string, skipGrading bool) {
 }
 
 func parseVia(text string) (via string, rest string) {
-	// "/via Name: ..." preserves the original speaker when forwarding someone else's note.
+	// "/via Name: ..." strips the attribution prefix; the name is discarded
+	// (content-only knowledge base) and only the note text is kept.
 	text = strings.TrimSpace(text)
 
 	if !strings.HasPrefix(text, "/via") {
@@ -308,17 +306,4 @@ func parseSkip(text string) string {
 	return strings.TrimSpace(strings.TrimPrefix(text, "/skip"))
 }
 
-func resolveSender(from *TelegramUser, via string) string {
-	if via != "" {
-		return via
-	}
 
-	if from != nil {
-		if from.FirstName != "" {
-			return from.FirstName
-		}
-		return from.UserName
-	}
-
-	return ""
-}

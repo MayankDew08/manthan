@@ -162,7 +162,7 @@ def run_all():
               f"{len(result['verified'])}/{len(result['graded'])}")
 
         # ---- promotion path unit test ----
-        d = SimpleNamespace(datetime_iso="2026-08-14T22:00:00", sender="Alice")
+        d = SimpleNamespace(datetime_iso="2026-08-14T22:00:00")
         g3 = SimpleNamespace(quality=3, confidence=0.8, category="discussion",
                              reason="", topics=[], original_text="check this https://promo.example/x")
         g5 = SimpleNamespace(quality=5, confidence=0.9, category="resource",

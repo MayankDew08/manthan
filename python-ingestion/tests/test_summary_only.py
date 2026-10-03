@@ -68,7 +68,6 @@ def run_all():
     enrich.save_list(enrich.ASK_USER_FILE, [])
     enrich.save_list(enrich.ENRICHED_FILE, [{
         "sent_at": "2026-08-16T10:00:00",
-        "sender": "Alice",
         "original_text": f"Read this {url}",
         "links": [url],
         "link_previews": [{"url": url, "status": "scraped", "summary": "Old summary"}],

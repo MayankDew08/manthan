@@ -26,16 +26,14 @@ def identify_messages(
     messages: list[Data],
 ) -> list[IdentifiedMessage]:
 
-    occurrences: dict[tuple[str, str, str], int] = {}
+    occurrences: dict[tuple[str, str], int] = {}
     results: list[IdentifiedMessage] = []
 
     for message in messages:
-        sender = message.sender.strip()
         text = normalize_text(message.text)
 
         message_signature = (
             message.datetime_iso,
-            sender,
             text,
         )
 
@@ -45,7 +43,6 @@ def identify_messages(
         identity_data = [
             source_id,
             message.datetime_iso,
-            sender,
             text,
             occurrence,
         ]

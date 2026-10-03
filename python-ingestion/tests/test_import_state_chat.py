@@ -50,7 +50,6 @@ def test_base_parse_count(base_ids):
 
 def test_last_five_base_messages(base_ids):
     last = base_ids[-5:]
-    assert last[-1].data.sender == "Dave"
     assert "personal brand" in last[-1].data.text
     # previous vs extras: base tail does NOT contain the new lines
     all_text = " ".join(m.data.text for m in last)

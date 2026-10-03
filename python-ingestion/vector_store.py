@@ -43,16 +43,14 @@ class VectorStore:
         return self.embed_fn(text)
 
     def upsert_message(self, msg: dict):
-        """Embed a message under a deterministic sender/timestamp point ID."""
+        """Embed a message under a deterministic content-based point ID."""
         text = msg.get("synthesized_text") or msg.get("original_text") or ""
-        sender = msg.get("sender") or ""
         sent_at = msg.get("sent_at") or msg.get("datetime_iso") or ""
         point = PointStruct(
-            id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"msg-{sender}-{sent_at}")),
+            id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"msg-{sent_at}-{text}")),
             vector=self._embed(text),
             payload={
                 "text": text,
-                "sender": sender,
                 "sent_at": sent_at,
                 "quality": msg.get("quality"),
                 "trusted": bool(msg.get("trusted")),

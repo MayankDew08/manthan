@@ -9,7 +9,7 @@ from import_state import ImportStateStore, identify_messages
 
 
 def test_same_message_same_id():
-    m = [Data(datetime_iso="2026-08-28T10:30:00", sender="Alice",
+    m = [Data(datetime_iso="2026-08-28T10:30:00",
              text="Hello", is_media=False)]
     first = identify_messages("local:test-chat", m)
     second = identify_messages("local:test-chat", m)
@@ -18,8 +18,8 @@ def test_same_message_same_id():
 
 def test_different_messages_different_ids():
     msgs = [
-        Data("2026-08-28T10:30:00", "Alice", "Hello", False),
-        Data("2026-08-28T10:31:00", "Alice", "Goodbye", False),
+        Data("2026-08-28T10:30:00", "Hello", False),
+        Data("2026-08-28T10:31:00", "Goodbye", False),
     ]
     identified = identify_messages("local:test-chat", msgs)
     assert identified[0].message_id != identified[1].message_id
@@ -27,8 +27,8 @@ def test_different_messages_different_ids():
 
 def test_duplicate_messages_separate_ids_and_occurrence():
     dup = [
-        Data("2026-08-28T10:30:00", "Alice", "Yes", False),
-        Data("2026-08-28T10:30:00", "Alice", "Yes", False),
+        Data("2026-08-28T10:30:00", "Yes", False),
+        Data("2026-08-28T10:30:00", "Yes", False),
     ]
     dup_id = identify_messages("local:test-chat", dup)
     assert dup_id[0].message_id != dup_id[1].message_id
@@ -36,20 +36,33 @@ def test_duplicate_messages_separate_ids_and_occurrence():
     assert dup_id[1].occurrence == 2
 
 
+def test_same_text_same_time_collapses_across_senders():
+    # Sender is not part of identity: identical (datetime, text) pairs that
+    # used to differ by sender now share identity, disambiguated by occurrence.
+    dup = [
+        Data("2026-08-28T10:30:00", "Yes", False),
+        Data("2026-08-28T10:30:00", "Yes", False),
+    ]
+    dup_id = identify_messages("local:test-chat", dup)
+    assert dup_id[0].occurrence == 1
+    assert dup_id[1].occurrence == 2
+    assert dup_id[0].message_id != dup_id[1].message_id
+
+
 def test_different_source_separate_ids():
     g1 = identify_messages("gdrive:file-one",
-                           [Data("2026-08-28T10:30:00", "Alice", "Hello", False)])
+                           [Data("2026-08-28T10:30:00", "Hello", False)])
     g2 = identify_messages("gdrive:file-two",
-                           [Data("2026-08-28T10:30:00", "Alice", "Hello", False)])
+                           [Data("2026-08-28T10:30:00", "Hello", False)])
     assert g1[0].message_id != g2[0].message_id
 
 
 def test_append_keeps_previous_ids():
     original = [
-        Data("2026-08-28T10:30:00", "Alice", "A", False),
-        Data("2026-08-28T10:31:00", "Alice", "B", False),
+        Data("2026-08-28T10:30:00", "A", False),
+        Data("2026-08-28T10:31:00", "B", False),
     ]
-    updated = original + [Data("2026-08-28T10:32:00", "Alice", "C", False)]
+    updated = original + [Data("2026-08-28T10:32:00", "C", False)]
     first = identify_messages("local:test-chat", original)
     second = identify_messages("local:test-chat", updated)
     assert first[0].message_id == second[0].message_id

@@ -82,7 +82,6 @@ class IngestMessageRequest(BaseModel):
     telegram_update_id: Optional[int] = None
     type: str = "ingest"
     chat_id: Optional[int] = None
-    sender_name: str = ""
     text: str
     telegram_message_id: Optional[int] = None
     skip_grading: bool = False
@@ -186,7 +185,6 @@ def ingest_message(req: IngestMessageRequest):
     try:
         result = ingest.ingest_message(
             text,
-            sender=req.sender_name or "",
             sent_at=sent_at,
             trusted=bool(req.skip_grading),
             store=app.state.store,
@@ -298,15 +296,12 @@ def skip_link(req: SkipRequest):
     return {"ok": True, "url": found["url"], "status": "skipped"}
 
 
-def _query_messages(*, sender: Optional[str], topic: Optional[str],
+def _query_messages(*, topic: Optional[str],
                     entity: Optional[str], since: Optional[str],
                     min_quality: Optional[int], limit: int) -> list:
     """Read message records from Neo4j with lightweight graph filters."""
     where = []
     params = {}
-    if sender:
-        where.append("m.sender = $sender")
-        params["sender"] = sender
     if since:
         where.append("m.sent_at >= $since")
         params["since"] = since
@@ -341,7 +336,6 @@ def _query_messages(*, sender: Optional[str], topic: Optional[str],
         m = dict(row["m"])
         out.append({
             "type": "message",
-            "sender": m.get("sender"),
             "sent_at": m.get("sent_at"),
             "text": m.get("text"),
             "quality": m.get("quality"),
@@ -354,13 +348,13 @@ def _query_messages(*, sender: Optional[str], topic: Optional[str],
 
 
 @app.get("/messages")
-def list_messages(sender: Optional[str] = None, topic: Optional[str] = None,
+def list_messages(topic: Optional[str] = None,
                   entity: Optional[str] = None, since: Optional[str] = None,
                   min_quality: Optional[int] = Query(default=None, ge=0, le=10),
                   limit: int = Query(default=50, ge=1, le=500)):
     """Expose stored messages for debugging and local inspection."""
     MESSAGES_QUERIES.inc()
-    rows = _query_messages(sender=sender, topic=topic, entity=entity,
+    rows = _query_messages(topic=topic, entity=entity,
                            since=since, min_quality=min_quality, limit=limit)
     return {"count": len(rows), "messages": rows}
 

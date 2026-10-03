@@ -82,7 +82,7 @@ def format_results(data: dict) -> str:
 
     lines = [f"Found {data.get('count', len(results))} results:"]
     for i, result in enumerate(results, 1):
-        header = result.get("sender") or result.get("title") or "?"
+        header = result.get("title") or f"result {i}"
         lines.append(f"{i}. {header} (score {result.get('score', 0)})")
         lines.append(f"   {result.get('text', '')}")
         if result.get("url"):
@@ -164,10 +164,10 @@ def main():
                     resp = requests.get(PENDING_URL, timeout=30)
                     resp.raise_for_status()
                     data = resp.json()
-                    blocked = [link for link in data.get("links", [])
-                               if link.get("status") == "blocked"]
+                    pending = [link for link in data.get("links", [])
+                               if link.get("status") in ("blocked", "pending_paste")]
                     reply = format_blocked_reply(
-                        {"count": len(blocked), "links": blocked})
+                        {"count": len(pending), "links": pending})
                 else:
                     resp = requests.post(URL, json={"query": payload.get("text", ""), "top_k": 5})
                     resp.raise_for_status()
