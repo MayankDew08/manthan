@@ -1,0 +1,6 @@
+query_id,query_text,intent,origin,split,notes
+q001,What tools did people recommend for coordinating several coding agents running in parallel?,recommendation,real,development,Expect agent-orchestrator / fleet-manager style tools plus control-plane options
+q002,Which open-source options were shared for vector search or RAG without a hosted vector database?,recommendation,real,development,Expect Qdrant and ParadeDB specifically; pgvector mention is partial
+q003,What did the group say about retrieval quality and reranking in RAG systems?,concept,real,development,Split across rerank-before-answer claim and the RAG survey
+q004,Who in this group has built observability or governance tooling for AI agents?,person_lookup,real,development,ClawMetry author and the ClawMetry project links
+q005,What local setup did someone describe for running their own model to do coding and design work?,concept,real,development,"Expect llama.cpp, Qwen dense vs MoE, Hermes; RTX/Ollama intros are weaker matches"

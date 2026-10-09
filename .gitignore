@@ -36,7 +36,11 @@ discarded_log.json
 data
 python-ingestion/metrics/last_run.json
 # Search evals can contain verbatim messages and derived private content.
-python-ingestion/evals/
+# Only reviewed eval code and the hand-written pool keyword list are tracked.
+python-ingestion/evals/*
+!python-ingestion/evals/*.py
+!python-ingestion/evals/pool_keywords.json
+!python-ingestion/evals/predictions.json
 # Secrets / OAuth credentials
 secrets/
 token.json
