@@ -1,0 +1,13 @@
+{
+  "_notes": "Human-reviewed. 'keywords' widen the annotation pool (whole-token, case-insensitive) using terms from each query's notes column; they never decide relevance. 'must_pool' lists text markers whose documents MUST reach the annotator even when cosine buries them (acceptance test 7).",
+  "keywords": {
+    "q001": ["orchestrator", "orchestration", "fleet", "control plane", "control-plane"],
+    "q002": ["qdrant", "paradedb", "pgvector", "vector database", "vector db"],
+    "q003": ["rerank", "reranking", "retrieval-augmented", "retrieval augmented", "survey"],
+    "q004": ["clawmetry", "observability", "governance"],
+    "q005": ["llama.cpp", "qwen", "moe", "hermes", "ollama", "rtx", "local model"]
+  },
+  "must_pool": {
+    "q005": ["Local Model Setup"]
+  }
+}
