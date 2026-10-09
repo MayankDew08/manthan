@@ -144,7 +144,7 @@ def fetch_changes_since_saved_token(
                 .list(
                     pageToken=page_token,
                     spaces="drive",
-                    fields="nextPageToken, changes(fileId, file(name,mimeType,parents,modifiedTime,version), type, removed)",
+                    fields="nextPageToken, changes(fileId, file(name,mimeType,parents,modifiedTime,version,trashed), type, removed)",
                     includeRemoved=True,
                     pageSize=1000,
                 )
@@ -186,6 +186,9 @@ def is_relevant_drive_change(change: dict, folder_id: str) -> bool:
     if change.get("type") != "file":
         return False
     file_meta = change.get("file") or {}
+    if file_meta.get("trashed"):
+        # Trashing a file is itself a change event; never import from the bin.
+        return False
     if file_meta.get("mimeType", "").lower() not in _ZIP_MIMES:
         return False
     parents = file_meta.get("parents") or []
