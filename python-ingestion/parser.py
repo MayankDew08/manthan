@@ -12,11 +12,13 @@ class Data:
     is_media : bool
 
 message_re = re.compile(
-    r"^(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}(?::\d{2})?\s*[APap][Mm])(?:\s*-\s*)?"
+    r"^(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}(?::\d{2})?(?:\s*[APap][Mm])?)(?:\s*-\s*)?"
 )
 
 DATE_FORMATS = ("%d/%m/%y", "%d/%m/%Y")
-TIME_FORMATS = ("%I:%M:%S %p", "%I:%M %p")
+# 12-hour variants first (existing behavior unchanged), then 24-hour
+# exports that omit AM/PM entirely (e.g. "21/08/2024, 21:17").
+TIME_FORMATS = ("%I:%M:%S %p", "%I:%M %p", "%H:%M:%S", "%H:%M")
 
 
 def parse_datetime(date_str: str, time_str: str) -> datetime.datetime:
@@ -36,6 +38,7 @@ def parse_datetime(date_str: str, time_str: str) -> datetime.datetime:
 def parse_chat(file_path: str) -> list[Data]:
     """Read a UTF-8 chat export and preserve multiline message bodies."""
     messages = []
+    in_system_event = False
     with open(file_path, "r", encoding="utf-8") as file:
         for line in file:
             line = line.rstrip("\n")
@@ -43,18 +46,23 @@ def parse_chat(file_path: str) -> list[Data]:
             if match:
                 date_str, time_str = match.groups()
                 rest = line[match.end():]
-                if ": " in rest:
-                    # WhatsApp header format is "sender: text" — the sender
-                    # prefix is structural and discarded (content-only KB).
-                    _, text = rest.split(": ", 1)
-                else:
-                    text = rest
+                if ": " not in rest:
+                    # No "sender: " prefix means a WhatsApp system event
+                    # (joined/added/left/subject change/encryption notice).
+                    # These start with a member's phone number, so they must
+                    # never become messages.
+                    in_system_event = True
+                    continue
+                in_system_event = False
+                # WhatsApp header format is "sender: text" — the sender
+                # prefix is structural and discarded (content-only KB).
+                _, text = rest.split(": ", 1)
                 messages.append(Data(
                     parse_datetime(date_str, time_str).isoformat(),
                     text,
                     "<Media omitted>" in text,
                 ))
-            elif messages and line:
+            elif messages and line and not in_system_event:
                 messages[-1].text += "\n" + line
     return messages
 
