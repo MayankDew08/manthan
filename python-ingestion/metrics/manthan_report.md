@@ -135,3 +135,82 @@ Final-file quality distribution (301 grades): q1 **120** / q2 **66** / q3 **17**
   **6/6** sources revisioned; page tokens and watch rows preserved.
 - **Neo4j:** 145 Messages, 68 Links, **0 Persons, 0 SENT edges, 0 sender props**.
 - **Qdrant** (`manthan-fresh`, 384-dim cosine): **144 points**, status green.
+
+---
+
+# Appendix B — Clean rebuild and re-ingest (2026-10-09)
+
+_Sections 1–7 and Appendix A above are preserved unchanged. This appendix records
+the Phase 0 rebuild from `docs/retrieval-eval-run-a-spec.md`. It contains ingestion
+and store metrics only: **no retrieval-evaluation numbers exist yet**. Run A metrics
+come after the corpus is frozen and human-labelled._
+
+## B.1 Why a rebuild
+
+The working branch had not merged the sender removal, so imports re-wrote `sender`
+and stored every message twice under two point-ID schemes. Separately, the parser
+turned WhatsApp system events ("+NN … joined using a group link") into messages,
+leaking members' phone numbers into message text. Both were fixed before rebuilding
+(parser skips system events; the importer's temp-file serializer emits a
+placeholder author so its own output still round-trips).
+
+| Store | Before rebuild | Action |
+|---|---|---|
+| Qdrant `manthan-fresh` | 193 points, 148 unique contents, 46 with `sender`, 3 phone-number texts | Snapshot, then collection deleted |
+| Neo4j | 193 Messages / 149 unique, 47 with `sender`, 2 Persons, 3 phone-number events | Persons + `sender` removed; 3 events and 44 duplicate nodes deleted → 146 |
+| SQLite | 1,032 processed rows, 10 sources | Backed up; processed rows wiped, revisions reset |
+
+## B.2 Files ingested
+
+| File | Parsed | Dropped (heuristic) | Low quality | Stored | Note |
+|---|---:|---:|---:|---:|---|
+| Workflows export, Oct 7 (upload 2) | 164 | 16 | 42 | 106 | Valid run |
+| Workflows export, Oct 7 (upload 1) | 164 | 16 | 148 | 0 | **Invalid**, see B.4 |
+| Test group exports (3 uploads) | 15 | 0 | 6 | 9 | Same 5 messages each |
+| **Run total** | **343** | **32** | **196** | **115** | |
+
+Not ingested: the **Sep 9 Workflows export** (still live in Drive). The change
+listener only imports files that changed, and this file did not. It holds
+10 messages absent from the Oct 7 export (145 shared, 19 newer only in Oct 7).
+
+Valid-run grade distribution (148 kept): pass 1 q1 **4** / q2 **22** / q3 **31** /
+q4 **60** / q5 **31**; after pass 2 q3 **16** / q4 **75** (15 promoted), so
+**106** at quality ≥ 4.
+
+## B.3 Tokens and latency (process-cumulative, `last_run.json`)
+
+- **120 LLM calls**, 196,969 in / 18,411 out (**215,380 total**)
+- LLM time 469.7 s; mean 3.91 s per call, max 12.8 s
+- Enrichment: 1 link scraped, 2 queued for manual paste, 45 already known, 65 messages without links
+
+## B.4 Defect found: stale graph resume
+
+Upload 1 of the Oct 7 export was "graded" in 12 s: all 148 messages got quality 1
+with the reason "The message is empty". The identical upload 2 graded normally
+(106 stored). Cause: the LangGraph thread ID is derived from `source_id + revision`.
+An attempt this morning on pre-merge code left that thread unfinished with empty
+texts. After the rebuild reset revisions, the re-import mapped to the same thread
+and **resumed the stale state instead of grading**. The importer's guard compares
+counts only (148 = 148), so it passed.
+
+Impact: upload 1's 148 SQLite rows are wrong. Qdrant and Neo4j are unaffected,
+because the identical content was graded and stored correctly by upload 2.
+
+## B.5 Store state after this run
+
+- **SQLite:** 343 processed rows (32 dropped / 196 low-quality / 115 stored); 5 of 12 sources revisioned; page tokens and watch rows preserved.
+- **Neo4j:** 156 Messages, 72 Links, **0 Persons, 0 `sender` props, 0 duplicate nodes, 0 phone-number events, 0 empty texts**. Neo4j still holds messages from earlier (now trashed) exports, because the migration never deletes Message nodes, so its coverage is wider than Qdrant's.
+- **Qdrant** (`manthan-fresh`, 384-dim cosine): **148 points** (118 messages, 30 links), **0 `sender` keys, 0 PII-gate matches**; 1 repeated text (the same message posted a minute apart).
+
+## B.6 Post-run corrections (same day)
+
+- **Stale-resume and trashed-file defects fixed** (regression tests added). The
+  batch path now carries a content digest, and the importer rejects grades whose
+  texts do not match its batch. Drive listing and change handling skip trashed files.
+- **Bogus rows removed.** Upload 1's 164 rows (148 bogus "low quality" + 16
+  dropped) and its source row were deleted, after a SQLite backup. Qdrant and
+  Neo4j were untouched.
+- **SQLite now:** 179 processed rows (16 dropped / 48 low-quality / 115 stored).
+  B.5's totals describe the run as it happened.
+- **Pending owner actions in Drive:** trash the Sep 9 export (decision: live Oct 7
+  export is the source of truth) and the duplicate Oct 7 upload 1.
