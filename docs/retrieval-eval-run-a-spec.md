@@ -130,15 +130,15 @@ Failure classes are the plan doc's list plus:
 
 ## Pre-registered predictions
 
-These come from an offline preview on the **stale** manifest, so treat them as hypotheses only. After Phase 0, rerun the preview on the new corpus, update this table, and commit it **before** labelling starts. The report must compare outcomes against it.
+**These are hypotheses, not results.** They were written on 2026-10-10 from a look at the top cosine results on the rebuilt, restored corpus (`pilot-001`: 188 documents) and *before any labelling*. The real numbers come only from the human-labelled run. The report must compare outcomes against this table (`evals/predictions.json` holds the same content).
 
-| Query | Expected outcome | Reason |
+| Query | Predicted outcome | Reason |
 | --- | --- | --- |
-| q001 | Success, mediocre nDCG | Agent Orchestrator link at #1 (0.70); self-introductions take 3 of #2–6 |
-| q002 | Strong success | qdrant #1, ParadeDB #3, pgvector message #4 |
-| q003 | Strong success | Rerank-claim message #1 (0.71), RAG survey #2 |
-| q004 | Success, distractor-heavy | ClawMetry message and repo #1–2; intros take 4 of #3–8 |
-| q005 | **Failure: long-document miss** | Best answer is a ~780-word "Local Model Setup… MoE" message at #31 (0.30). Only partial matches (Local AI resources doc, Qwen link) reach the top 5 |
+| q001 | Success, mediocre nDCG | Agent Orchestrator link at #1 (0.70); self-introductions take #3-#5 |
+| q002 | Success | qdrant link #1, ParadeDB link #3, pgvector message #4 |
+| q003 | Success | Rerank-claim message #1 (0.71), RAG survey link #2 |
+| q004 | Success, distractor-heavy | ClawMetry author's message #1 (0.62); intros follow |
+| q005 | **Failure: long-document miss** | Best answer is a 1,132-token "Local Model Setup" message at cosine #38 (0.30), truncated at 256 tokens; pooled only via BM25/keywords |
 
 The pilot set is skewed toward easy, keyword-anchored queries. Do not read a 4/5 Success@5 as a property of the retriever.
 
