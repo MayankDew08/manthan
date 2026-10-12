@@ -1,13 +1,49 @@
 {
-  "_notes": "Human-reviewed. 'keywords' widen the annotation pool (whole-token, case-insensitive) using terms from each query's notes column; they never decide relevance. 'must_pool' lists text markers whose documents MUST reach the annotator even when cosine buries them (acceptance test 7).",
+  "_notes": "Human-reviewed. 'keywords' widen the annotation pool (whole-token, case-insensitive) using terms from each query's notes column; they never decide relevance. 'must_pool' lists text markers whose documents MUST reach the annotator even when cosine buries them (acceptance test 7). Every must_pool marker was checked against the corpus for exact substring collisions before use (e.g. 'Siddarthb07' instead of 'Anima', which also matches 'animated').",
   "keywords": {
     "q001": ["orchestrator", "orchestration", "fleet", "control plane", "control-plane"],
     "q002": ["qdrant", "paradedb", "pgvector", "vector database", "vector db"],
     "q003": ["rerank", "reranking", "retrieval-augmented", "retrieval augmented", "survey"],
     "q004": ["clawmetry", "observability", "governance"],
-    "q005": ["llama.cpp", "qwen", "moe", "hermes", "ollama", "rtx", "local model"]
+    "q005": ["llama.cpp", "qwen", "moe", "hermes", "ollama", "rtx", "local model"],
+    "q006": ["prompt injection", "noma", "github", "leaking", "gitlost"],
+    "q007": ["sleep", "burnout", "pendulum"],
+    "q008": ["harari", "lecture"],
+    "q009": ["hiring assignment", "evaluation process", "defensive mechanism"],
+    "q010": ["jamon", "agents.md", "router", "twitter"],
+    "q011": ["f1", "cricket manager", "race strategy", "fellow traveler"],
+    "q012": ["qwen3.8-27b", "rtx 3090", "vram", "optimization"],
+    "q013": ["anima", "interpretability", "hallucinate", "siddarthb07"],
+    "q014": ["google cloud", "ai infrastructure", "kumar abhishek"],
+    "q015": ["iiit delhi", "wildlife institute", "vaibhav", "wii"],
+    "q016": ["draup", "agentic data scraping", "sde-3", "ayush anand"],
+    "q017": ["zonko.ai", "luffy.so", "applied ai lab", "nishank"],
+    "q018": ["anima", "siddarthb07"],
+    "q019": ["gitlost", "leaking", "github", "case study"],
+    "q020": ["harari", "lecture"],
+    "q021": ["spec-kit", "demo", "vinay shenoy"],
+    "q022": ["lora", "fine-tun", "hyperparameter"],
+    "q023": ["docker", "kubernetes", "container", "deploy"],
+    "q024": ["salary", "compensation", "negotiation"],
+    "q025": ["funding round", "acquisition", "raised"]
   },
   "must_pool": {
-    "q005": ["Local Model Setup"]
+    "q005": ["Local Model Setup"],
+    "q006": ["GitLost"],
+    "q007": ["agents sleep"],
+    "q008": ["Harari"],
+    "q009": ["hiring assignments"],
+    "q010": ["Jamon's set up"],
+    "q011": ["fellow traveler's notes"],
+    "q012": ["rtx 3090"],
+    "q013": ["Siddarthb07"],
+    "q014": ["Kumar Abhishek"],
+    "q015": ["IIIT Delhi"],
+    "q016": ["Draup"],
+    "q017": ["zonko.ai"],
+    "q018": ["Siddarthb07"],
+    "q019": ["GitLost"],
+    "q020": ["Harari"],
+    "q021": ["spec-kit"]
   }
 }
