@@ -41,6 +41,7 @@ python-ingestion/evals/*
 !python-ingestion/evals/*.py
 !python-ingestion/evals/pool_keywords.json
 !python-ingestion/evals/predictions.json
+!python-ingestion/evals/ladder_predictions.json
 # Secrets / OAuth credentials
 secrets/
 token.json

@@ -22,6 +22,7 @@ evals/*
 !evals/*.py
 !evals/pool_keywords.json
 !evals/predictions.json
+!evals/ladder_predictions.json
 
 # Metrics / Reports
 metrics/*.md
