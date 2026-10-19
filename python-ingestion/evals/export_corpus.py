@@ -9,6 +9,7 @@ Usage (from python-ingestion/):
 
 import argparse
 import json
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -81,7 +82,8 @@ def main(argv=None) -> int:
     from qdrant_client import QdrantClient
     import embedder
 
-    client = QdrantClient(host=cfg["host"], port=cfg["port"])
+    client = QdrantClient(host=cfg["host"], port=cfg["port"],
+                          api_key=os.environ.get("QDRANT_API_KEY") or None)
     try:
         if not client.collection_exists(collection):
             print(f"FAIL: collection {collection!r} does not exist")

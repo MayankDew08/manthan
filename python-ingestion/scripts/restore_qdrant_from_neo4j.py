@@ -118,7 +118,8 @@ def main(argv=None) -> int:
 
     collection = args.collection or os.environ.get("QDRANT_COLLECTION", "manthan")
     host, port = os.environ.get("QDRANT_HOST", "localhost"), int(os.environ.get("QDRANT_PORT", "6333"))
-    client = QdrantClient(host=host, port=port)
+    client = QdrantClient(host=host, port=port,
+                          api_key=os.environ.get("QDRANT_API_KEY") or None)
     try:
         before = client.get_collection(collection).points_count or 0
         q_msgs, q_urls = _qdrant_state(client, collection)
@@ -137,7 +138,8 @@ def main(argv=None) -> int:
         print("dry run: nothing written")
         return 0
 
-    client = QdrantClient(host=host, port=port)
+    client = QdrantClient(host=host, port=port,
+                          api_key=os.environ.get("QDRANT_API_KEY") or None)
     try:
         snap = client.create_snapshot(collection_name=collection)
         print(f"snapshot taken: {snap.name}")

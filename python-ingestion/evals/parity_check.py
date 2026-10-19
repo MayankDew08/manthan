@@ -10,6 +10,7 @@ Usage (from python-ingestion/):
 """
 
 import argparse
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -55,7 +56,8 @@ def run_parity(corpus_version: str, collection: str | None = None) -> dict:
     from qdrant_client import QdrantClient
     import embedder
 
-    client = QdrantClient(host=cfg["host"], port=cfg["port"])
+    client = QdrantClient(host=cfg["host"], port=cfg["port"],
+                          api_key=os.environ.get("QDRANT_API_KEY") or None)
     try:
         live_count = client.get_collection(collection).points_count or 0
         stored: dict[str, list[float]] = {}

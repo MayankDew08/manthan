@@ -21,7 +21,7 @@ class VectorStore:
         self.client = QdrantClient(
             host=host or os.environ.get("QDRANT_HOST", "localhost"),
             port=int(port or os.environ.get("QDRANT_PORT", "6333")),
-            api_key=api_key,
+            api_key=api_key if api_key is not None else (os.environ.get("QDRANT_API_KEY") or None),
         )
         self.collection = collection or os.environ.get("QDRANT_COLLECTION", "manthan")
         self.embed_fn = embed_fn if embed_fn is not None else embed_text
