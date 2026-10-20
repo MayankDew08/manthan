@@ -214,3 +214,86 @@ because the identical content was graded and stored correctly by upload 2.
   B.5's totals describe the run as it happened.
 - **Pending owner actions in Drive:** trash the Sep 9 export (decision: live Oct 7
   export is the source of truth) and the duplicate Oct 7 upload 1.
+
+
+## Appendix C — Retrieval ladder
+
+n=22 answerable queries.
+
+### Per-step metrics (answerable queries)
+
+| Step | nDCG@5 | Success@5 | MRR@5 | Candidate Success@30 (lower bound) |
+|------|--------|-----------|-------|-----------------------------------|
+| ladder_s0_cosine | 0.5643 | 0.8636 | 0.7159 | 1.0000 |
+| ladder_s1_cos_bm25 | 0.6765 | 0.9545 | 0.8220 | 1.0000 (lower bound) |
+| ladder_s2_cos_bm25_rr | 0.7685 | 1.0000 | 0.9167 | 1.0000 (lower bound) |
+| ladder_s3_cos_bm25_graph | 0.7020 | 0.9545 | 0.8523 | 1.0000 (lower bound) |
+| ladder_s4_cos_bm25_graph_rr | 0.7724 | 1.0000 | 0.9129 | 1.0000 (lower bound) |
+
+### Pairwise comparisons
+
+**ladder_s0_cosine → ladder_s1_cos_bm25**
+- Verdict: improved
+- Win/tie/loss: 12 / 4 / 6 (improved: ['q004', 'q005', 'q006', 'q007', 'q008', 'q009', 'q011', 'q012', 'q015', 'q017', 'q020', 'q021']; regressed: ['q001', 'q002', 'q010', 'q016', 'q018', 'q025'])
+- Bootstrap (n=22): mean Δ=0.1122, CI=[0.0073, 0.2160]
+- Prediction: expected "no detectable difference" (BM25 should help exact-name queries (q006 GitLost, q013 Anima, q014-q017 people and companies), but cosine likely already finds several of them, and RRF can also demote a strong cosine #1 that BM25 ranks low. Expect a small positive mean delta whose CI crosses 0 at n=22, wins concentrated in person_lookup/temporal, and Candidate Success@30 >= step 0.) — ✗
+
+**ladder_s1_cos_bm25 → ladder_s2_cos_bm25_rr**
+- Verdict: improved
+- Win/tie/loss: 12 / 7 / 3 (improved: ['q001', 'q002', 'q004', 'q006', 'q008', 'q009', 'q010', 'q011', 'q013', 'q015', 'q020', 'q025']; regressed: ['q003', 'q012', 'q021'])
+- Bootstrap (n=22): mean Δ=0.0920, CI=[0.0282, 0.1565]
+- Prediction: expected "improved" (The cross-encoder reads query and document together, up to 512 tokens (26 of the 30 truncated documents fully), and should demote the self-introduction distractors that sit in cosine's top 5 on non-person queries. Risk: informal WhatsApp text is far from MS MARCO, so the gain could be smaller than on web passages.) — ✓
+
+**ladder_s1_cos_bm25 → ladder_s3_cos_bm25_graph**
+- Verdict: no detectable difference at n=22
+- Win/tie/loss: 8 / 7 / 7 (improved: ['q001', 'q002', 'q004', 'q007', 'q010', 'q011', 'q018', 'q020']; regressed: ['q003', 'q005', 'q006', 'q009', 'q012', 'q021', 'q025'])
+- Bootstrap (n=22): mean Δ=0.0256, CI=[-0.0363, 0.0882]
+- Prediction: expected "no detectable difference" (graph_lexical_v0 is substring keyword matching with no IDF, so it repeats BM25's signal, and does it worse (generic terms like 'group', 'when', 'first', 'llm' match a large share of messages). Expect at most 1-2 queries to change, Candidate Success@30 equal or +1, raw graph counts above 100 for queries with generic words, and a non-zero out-of-corpus count.) — ✓
+
+**ladder_s3_cos_bm25_graph → ladder_s4_cos_bm25_graph_rr**
+- Verdict: improved
+- Win/tie/loss: 10 / 6 / 6 (improved: ['q001', 'q004', 'q005', 'q006', 'q008', 'q009', 'q010', 'q013', 'q015', 'q025']; regressed: ['q002', 'q003', 'q007', 'q012', 'q018', 'q021'])
+- Bootstrap (n=22): mean Δ=0.0704, CI=[0.0001, 0.1441]
+- Prediction: expected "improved" (Same mechanism as s1->s2: re-ordering 30 candidates with a cross-encoder.) — ✓
+
+**ladder_s2_cos_bm25_rr → ladder_s4_cos_bm25_graph_rr**
+- Verdict: no detectable difference at n=22
+- Win/tie/loss: 1 / 19 / 2 (improved: ['q001']; regressed: ['q005', 'q007'])
+- Bootstrap (n=22): mean Δ=0.0039, CI=[-0.0068, 0.0202]
+- Prediction: expected "no detectable difference" (This is the graph's effect once a re-ranker is present. The graph should add few relevant candidates that cosine+BM25 missed, and the re-ranker should push any graph noise it adds out of the top 5.) — ✓
+
+**ladder_s0_cosine → ladder_s4_cos_bm25_graph_rr**
+- Verdict: improved
+- Win/tie/loss: 14 / 3 / 5 (improved: ['q001', 'q004', 'q005', 'q006', 'q007', 'q008', 'q009', 'q011', 'q012', 'q013', 'q015', 'q017', 'q020', 'q021']; regressed: ['q002', 'q003', 'q016', 'q018', 'q025'])
+- Bootstrap (n=22): mean Δ=0.2082, CI=[0.0938, 0.3344]
+- Prediction: expected "improved" (End to end, driven mainly by the re-ranker, not by BM25 or the graph.) — ✓
+
+### Abstention (no-answer queries)
+
+**ladder_s0_cosine**
+- No-answer top-1 scores: {'q022': 0.3345571, 'q023': 0.5514544, 'q024': 0.5420687}
+- Answerable top-1 scores: {'q001': 0.7000346, 'q002': 0.5093109, 'q003': 0.7103596, 'q004': 0.62046635, 'q005': 0.4320637, 'q006': 0.5195841, 'q007': 0.47300118, 'q008': 0.50330126, 'q009': 0.36281174, 'q010': 0.5073825, 'q011': 0.50927067, 'q012': 0.57647854, 'q013': 0.5465317, 'q014': 0.6848414, 'q015': 0.42414474, 'q016': 0.7518954, 'q017': 0.6363015, 'q018': 0.475621, 'q019': 0.7355914, 'q020': 0.46584958, 'q021': 0.4892819, 'q025': 0.38170046}
+- Median no-answer: 0.5421
+- Median answerable: 0.5093
+
+**ladder_s2_cos_bm25_rr**
+- No-answer top-1 scores: {'q022': -9.282022, 'q023': -1.302, 'q024': -5.894752}
+- Answerable top-1 scores: {'q001': 7.062949, 'q002': -3.154519, 'q003': 4.428553, 'q004': 5.228491, 'q005': 4.995416, 'q006': -4.447292, 'q007': -4.482089, 'q008': -0.102569, 'q009': -7.611075, 'q010': -0.658157, 'q011': 3.054396, 'q012': 0.934486, 'q013': 7.686624, 'q014': 7.979046, 'q015': 3.743757, 'q016': 9.07021, 'q017': 7.18703, 'q018': 2.16608, 'q019': 3.233656, 'q020': 4.190549, 'q021': -2.751807, 'q025': -8.997515}
+- Median no-answer: -5.8948
+- Median answerable: 3.1440
+
+**ladder_s4_cos_bm25_graph_rr**
+- No-answer top-1 scores: {'q022': -9.282022, 'q023': -1.302, 'q024': -5.894752}
+- Answerable top-1 scores: {'q001': 7.062949, 'q002': -3.154518, 'q003': 4.428553, 'q004': 5.228491, 'q005': 4.995416, 'q006': -4.447292, 'q007': -4.482089, 'q008': -0.102569, 'q009': -7.611075, 'q010': -0.658157, 'q011': 3.054396, 'q012': 0.934486, 'q013': 7.686624, 'q014': 7.979046, 'q015': 3.743757, 'q016': 9.07021, 'q017': 7.18703, 'q018': 2.166078, 'q019': 3.233656, 'q020': 4.190549, 'q021': -2.751807, 'q025': -8.997515}
+- Median no-answer: -5.8948
+- Median answerable: 3.1440
+
+### End-to-end latency (estimate across machines)
+
+- Machine: x86_64, 16 CPUs, GPU: NVIDIA GeForce RTX 4050 Laptop GPU
+- cosine_qdrant: n=25, p50=8.1ms, p95=10.1ms
+- graph_neo4j: n=25, p50=24.0ms, p95=60.4ms
+- bm25: n=25, p50=0.1ms, p95=0.1ms
+- rrf: n=25, p50=0.0ms, p95=0.0ms
+- rerank_cpu: n=25, p50=52.8ms, p95=70.0ms
+- rerank_gpu: n=25, p50=6.0ms, p95=14.4ms
