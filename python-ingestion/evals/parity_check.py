@@ -57,7 +57,8 @@ def run_parity(corpus_version: str, collection: str | None = None) -> dict:
     import embedder
 
     client = QdrantClient(host=cfg["host"], port=cfg["port"],
-                          api_key=os.environ.get("QDRANT_API_KEY") or None)
+                          api_key=os.environ.get("QDRANT_API_KEY") or None,
+                          https=False)
     try:
         live_count = client.get_collection(collection).points_count or 0
         stored: dict[str, list[float]] = {}

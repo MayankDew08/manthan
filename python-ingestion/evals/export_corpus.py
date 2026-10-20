@@ -83,7 +83,8 @@ def main(argv=None) -> int:
     import embedder
 
     client = QdrantClient(host=cfg["host"], port=cfg["port"],
-                          api_key=os.environ.get("QDRANT_API_KEY") or None)
+                          api_key=os.environ.get("QDRANT_API_KEY") or None,
+                          https=False)
     try:
         if not client.collection_exists(collection):
             print(f"FAIL: collection {collection!r} does not exist")

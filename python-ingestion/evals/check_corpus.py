@@ -35,7 +35,8 @@ def check_hygiene(docs: list[dict], collection: str, skip_neo4j: bool) -> tuple:
     from evals.export_corpus import scroll_all
     cfg = common.qdrant_settings()
     client = QdrantClient(host=cfg["host"], port=cfg["port"],
-                          api_key=os.environ.get("QDRANT_API_KEY") or None)
+                          api_key=os.environ.get("QDRANT_API_KEY") or None,
+                          https=False)
     try:
         sender_keys = sum(1 for p in scroll_all(client, collection) if "sender" in (p.payload or {}))
     finally:
@@ -148,7 +149,8 @@ def main(argv=None) -> int:
 
     from qdrant_client import QdrantClient
     client = QdrantClient(host=cfg["host"], port=cfg["port"],
-                          api_key=os.environ.get("QDRANT_API_KEY") or None)
+                          api_key=os.environ.get("QDRANT_API_KEY") or None,
+                          https=False)
     try:
         live = client.get_collection(collection).points_count or 0
     finally:
