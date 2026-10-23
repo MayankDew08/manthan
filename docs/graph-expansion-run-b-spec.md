@@ -123,8 +123,7 @@ Constants (pre-registered, never tuned after a result):
 Commit the blank-row filter in `evals/topup.py:cmd_merge` (it's currently uncommitted drift), add a test in `tests/test_ladder_topup.py`, and re-lock `tests/LOCK.sha256`. U6 depends on this.
 
 ### P2 — owner: finalize `queries_graph.csv` (repo root)
-- **Draft in place (2026-10-23):** 4 `thin_message` (g001–g004), 4 `relational` (g005–g008), `origin=planner_draft`. The owner edits wording/answers, sets `origin=owner_adjusted` on changed rows, and commits.
-- Open owner choice: **g008** (answerable only through time adjacency, which no system models). Keep it as an honest probe of missing edges, or replace it.
+- **Final set (2026-10-23, revised at the owner's direction to centre on link content):** 4 `thin_message` (g001–g004), 4 `relational` (g005–g008), `origin=planner_draft`. Each question **describes a link by its content, not its name** (e.g. "the executable-specification tool", not "Quint"), and asks for the link **plus what connects to it** (who shared it, the discussion, related links). Those connected messages mostly don't share the link's words, which is where the graph should help. The earlier time-only question was dropped.
 - **8 queries**, same columns as `queries.csv` (`query_id,query_text,intent,origin,split,notes`), ids `g001…g008`.
 - **Types:** at least 3 with `intent=relational` (relevant through a connection) and at least 3 with `intent=thin_message` (the answer is a thin message, or is reached through one).
 - **`notes` must name the expected answer doc(s)**, written before anything runs.
