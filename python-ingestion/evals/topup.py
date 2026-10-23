@@ -230,7 +230,9 @@ def cmd_merge(corpus_version: str) -> int:
             raise SystemExit(f"{path} not found: run 'uv run python -m evals.topup build' "
                              f"and grade the sheet before merging")
 
-    rows = merge_qrels(read_csv(annotation_path), read_csv(topup_path))
+    annotation_rows = [r for r in read_csv(annotation_path) if (r.get("relevance") or "").strip()]
+    topup_rows = read_csv(topup_path)
+    rows = merge_qrels(annotation_rows, topup_rows)
     out_path = data / QRELS_V2
     write_csv(out_path, rows, QRELS_COLUMNS)
     print(f"{common.utc_now()}  wrote {len(rows)} judged row(s) -> {out_path}")

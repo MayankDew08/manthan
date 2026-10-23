@@ -139,6 +139,37 @@ class TestMergeQrels:
         assert topup.QRELS_V2 == "qrels_v2.csv"
 
 
+def _write_sheet(path, rows):
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=common.ANNOTATION_COLUMNS)
+        w.writeheader()
+        w.writerows(rows)
+
+
+class TestCmdMerge:
+    """annotation.csv holds the full pool, so ungraded rows are expected there; the top-up sheet must be fully graded."""
+
+    def _data(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(common, "EVALS_DIR", tmp_path)
+        data = common.data_dir("pilot-test")
+        return data
+
+    def test_ungraded_annotation_rows_are_skipped(self, monkeypatch, tmp_path):
+        data = self._data(monkeypatch, tmp_path)
+        _write_sheet(data / topup.ANNOTATION, [ann("q1", "message:a", "3"), ann("q1", "message:b", " ")])
+        _write_sheet(data / topup.ANNOTATION_TOPUP, [ann("q1", "message:c", "1")])
+        assert topup.cmd_merge("pilot-test") == 0
+        q = common.load_qrels(data / topup.QRELS_V2)
+        assert set(q["q1"]) == {"message:a", "message:c"}
+
+    def test_blank_topup_grade_still_fails(self, monkeypatch, tmp_path):
+        data = self._data(monkeypatch, tmp_path)
+        _write_sheet(data / topup.ANNOTATION, [ann("q1", "message:a", "3")])
+        _write_sheet(data / topup.ANNOTATION_TOPUP, [ann("q1", "message:c", "")])
+        with pytest.raises(ValueError, match="message:c"):
+            topup.cmd_merge("pilot-test")
+
+
 @pytest.mark.artifacts
 def test_artifact_qrels_v2_judges_every_top5_pair_of_every_ladder_step():
     from evals import run_ladder
