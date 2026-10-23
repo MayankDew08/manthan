@@ -407,7 +407,7 @@ Tokenizer-dependent tests use the real embedder tokenizer under `--model`; the r
 | C1-B3 | behaviour | message with no link; any link doc | unchanged |
 | C1-E1 | boundary | contained link outside the corpus | ignored |
 | C1-E2 | boundary | same link contained twice | appended once |
-| C1-E3 | boundary | fake budget 10, message 4 words, link 20 words | link trimmed to fit 6 tokens (accounting for the separator), cut on a word boundary; `links_trimmed == 1` |
+| C1-E3 | boundary | fake budget 10, message 4 words, link 20 words | link trimmed to 5 tokens (10 − 4 message − 1 separator), cut on a word boundary; `links_trimmed == 1` |
 | C1-E4 | boundary | message alone ≥ budget | message unchanged; `links_dropped_no_room == 1` |
 | C1-E5 | boundary (`--model`) | real tokenizer: every output text | ≤ 256 tokens incl. special tokens |
 | C1-F1 | failure | parity: re-embedded unchanged text vs stored vector < `MIN_PARITY_COSINE` | raises |
