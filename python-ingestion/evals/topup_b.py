@@ -183,8 +183,12 @@ def _adjacency_from_frozen(rows: list[dict[str, Any]]) -> dict[str, list[dict[st
     return out
 
 
-def _read_jsonl_if_exists(path: Path) -> list[dict[str, Any]]:
-    return common.read_jsonl(path) if path.exists() else []
+def _require_jsonl(path: Path) -> list[dict[str, Any]]:
+    """A missing frozen/run file must raise, naming it -- never a silent
+    empty run that makes the pool quietly partial (review #5 P4)."""
+    if not path.exists():
+        raise ValueError(f"missing input for the top-up build: {path}")
+    return common.read_jsonl(path)
 
 
 def cmd_build(data_dir: Path, queries_path: Path, graphq_queries_path: Path) -> int:
@@ -197,20 +201,20 @@ def cmd_build(data_dir: Path, queries_path: Path, graphq_queries_path: Path) -> 
     }
 
     runs_dir = data_dir / "runs"
-    original_runs = {rid: _read_jsonl_if_exists(runs_dir / f"{rid}.jsonl") for rid in GRAPH_SYSTEMS}
+    original_runs = {rid: _require_jsonl(runs_dir / f"{rid}.jsonl") for rid in GRAPH_SYSTEMS}
     qrels_v2_path = data_dir / "qrels_v2.csv"
     qrels_v2 = (common.load_qrels(qrels_v2_path, valid_ids=set(docs_by_id))
                 if qrels_v2_path.exists() else {})
+
+    graphq_runs = {rid: _require_jsonl(runs_dir / f"{rid}.graphq.jsonl")
+                   for rid in GRAPH_SYSTEMS}
+    graphq_cosine = _require_jsonl(runs_dir / "vector_cosine_graphq_v1.jsonl")
+    neighbors = _adjacency_from_frozen(_require_jsonl(runs_dir / "graph_neighbors_v1.jsonl"))
 
     pairs_original = original_pairs(original_runs, qrels_v2)
     check_sheet_size("original", len(pairs_original))
     original_sheet = build_sheet(pairs_original, queries_by_id, docs_by_id, kind="original")
     write_csv(data_dir / "annotation_topup_b.csv", original_sheet, common.ANNOTATION_COLUMNS)
-
-    graphq_runs = {rid: _read_jsonl_if_exists(runs_dir / f"{rid}.graphq.jsonl")
-                   for rid in GRAPH_SYSTEMS}
-    graphq_cosine = _read_jsonl_if_exists(runs_dir / "vector_cosine_graphq_v1.jsonl")
-    neighbors = _adjacency_from_frozen(_read_jsonl_if_exists(runs_dir / "graph_neighbors_v1.jsonl"))
 
     pairs_graph = graph_pairs(graphq_runs, graphq_cosine)
     check_sheet_size("graph", len(pairs_graph))
