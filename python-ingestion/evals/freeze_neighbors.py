@@ -414,8 +414,10 @@ def _run_cli(out_dir: Path | None = None, corpus_version: str = common.DEFAULT_C
                          "payload_entities_v1.json", "vector_cosine_graphq_v1.jsonl",
                          "document_vectors_v1.npy", "document_vectors_v1.ids.json"):
                 file_sha256[name] = hashlib.sha256((runs_dir / name).read_bytes()).hexdigest()
-            documents_path = (out_dir if out_dir is not None else
-                              common.data_dir(corpus_version)) / "documents.jsonl"
+            # documents.jsonl is the corpus manifest, not this freeze's own
+            # output -- it always lives under the real corpus data dir, even
+            # when out_dir redirects where the freeze's own files go.
+            documents_path = common.data_dir(corpus_version) / "documents.jsonl"
             file_sha256["documents.jsonl"] = hashlib.sha256(documents_path.read_bytes()).hexdigest()
             meta["file_sha256"] = file_sha256
 
