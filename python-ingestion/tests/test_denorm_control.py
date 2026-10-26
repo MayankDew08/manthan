@@ -182,7 +182,19 @@ class TestC1Boundaries:
         texts, _ = dc.denorm_texts(docs, neighbors)
         tokenizer = dc._get_tokenizer()
 
+        # Spec: "the message text comes first, untouched... if the message
+        # alone uses the whole budget, nothing is appended." So C1 can only
+        # promise the budget for a message that was already within it before
+        # gluing; a message already over budget on its own (and every link,
+        # which is unchanged, D23/R5) passes through untouched and is not
+        # part of this check -- real corpus data has both kinds.
         for cid, text in texts.items():
+            doc = docs[cid]
+            if doc.get("candidate_type") != "message":
+                continue
+            own_len = len(tokenizer.encode(doc.get("embedded_text") or ""))
+            if own_len > dc.MAX_SEQ_LENGTH:
+                continue
             assert len(tokenizer.encode(text)) <= dc.MAX_SEQ_LENGTH, cid
 
 
