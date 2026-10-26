@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -216,30 +217,64 @@ def build_node_rows(
 
 # ---- Live Qdrant read -------------------------------------------------------
 
+def _alias_point_id(doc: dict[str, Any]) -> str:
+    """D25: the Qdrant point id this doc's own (sent_at, embedded_text) hashes
+    to right now -- the id its current text actually lives under, if its own
+    recorded ``qdrant_point_id`` has drifted."""
+    return str(uuid.uuid5(
+        uuid.NAMESPACE_URL, f"msg-{doc.get('sent_at') or ''}-{doc.get('embedded_text') or ''}"))
+
+
+def build_alias_map(corpus_docs: list[dict[str, Any]]) -> dict[str, str]:
+    """``{alias_point_id: corpus_candidate_id}`` for every message doc (D25).
+
+    Only messages: the formula is ``candidate_id_for``'s message branch; a
+    link's id is url-based and unrelated to this drift.
+    """
+    return {
+        _alias_point_id(d): d["candidate_id"]
+        for d in corpus_docs if d.get("candidate_type") == "message"
+    }
+
+
 def build_payload_entities(
     client, collection: str, corpus_docs: list[dict[str, Any]],
-) -> tuple[dict[str, Any], dict[str, list[float]]]:
+) -> tuple[dict[str, Any], dict[str, list[float]], dict[str, str]]:
     """Scroll the collection once; keep only corpus points, keyed by candidate_id.
 
-    Returns ``(payload_entities, stored_vectors)``: the entities/topics payload
-    (review #4 K4: ``stored_vectors`` lets U5's C1 parity check compare a
+    Returns ``(payload_entities, stored_vectors, qdrant_id_aliases)``:
+    ``stored_vectors`` (review #4 K4) lets U5's C1 parity check compare a
     re-embedded unchanged doc against what Qdrant actually stores, offline,
-    without a second live scroll).
+    without a second live scroll; ``qdrant_id_aliases`` is
+    ``{corpus_id: live_point_id}`` for every doc found only by its D25 alias.
 
-    Raises if a corpus doc's own ``qdrant_point_id`` is missing from the live
-    collection -- the manifest and the live store have drifted; escalate,
-    don't silently write a short file (spec section 10).
+    A corpus doc's candidate_id never changes (D25). If its own
+    ``qdrant_point_id`` isn't live, it may still be found by the EXACT
+    uuid5 of its own (sent_at, embedded_text) -- never any other fuzzy
+    match -- and is then keyed by its corpus candidate_id, same as always.
+    A doc matching neither still raises: the manifest and the live store
+    have drifted in some other way; escalate, don't silently write a short
+    file (spec section 10).
     """
     by_point_id = {d["qdrant_point_id"]: d["candidate_id"] for d in corpus_docs}
+    alias_by_point_id = build_alias_map(corpus_docs)
+
     payload_out: dict[str, Any] = {}
     vectors_out: dict[str, list[float]] = {}
+    aliases_used: dict[str, str] = {}
     offset = None
     while True:
         points, offset = client.scroll(
             collection_name=collection, limit=256, offset=offset, with_payload=True,
             with_vectors=True)
         for point in points:
-            cid = by_point_id.get(str(point.id))
+            point_id = str(point.id)
+            cid = by_point_id.get(point_id)
+            if cid is None:
+                alias_cid = alias_by_point_id.get(point_id)
+                if alias_cid is not None and alias_cid not in payload_out:
+                    cid = alias_cid
+                    aliases_used[cid] = point_id
             if cid is None:
                 continue
             payload = point.payload or {}
@@ -256,27 +291,42 @@ def build_payload_entities(
     if missing:
         raise ValueError(
             f"{len(missing)} corpus doc(s) not found in the live Qdrant collection "
-            f"by their own qdrant_point_id (manifest/live-store drift): {missing}")
-    return payload_out, vectors_out
+            f"by their own qdrant_point_id or an exact D25 alias (manifest/live-store "
+            f"drift): {missing}")
+    return payload_out, vectors_out, aliases_used
 
 
 def build_graphq_cosine_rows(
     queries: list[dict[str, Any]], vs, corpus_ids: set[str], run_id: str,
+    alias_map: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    """All 188 corpus ranks per graph query (closed corpus: outside docs never ranked)."""
+    """All 188 corpus ranks per graph query (closed corpus: outside docs never ranked).
+
+    ``alias_map`` (``{live_point_id: corpus_candidate_id}``, from
+    ``build_alias_map``) translates a hit on a D25-aliased live id back to
+    its stable corpus candidate_id.
+    """
+    alias_map = alias_map or {}
     rows = []
     for q in queries:
         hits = vs.search(q["query_text"], limit=len(corpus_ids) * 2 + 16)
-        in_corpus_hits = [h for h in hits if f"{(h.payload or {}).get('type')}:{h.id}" in corpus_ids]
-        if len(in_corpus_hits) < len(corpus_ids):
+        resolved = []
+        for hit in hits:
+            live_cid = f"{(hit.payload or {}).get('type')}:{hit.id}"
+            if live_cid in corpus_ids:
+                resolved.append((live_cid, hit))
+                continue
+            aliased_cid = alias_map.get(str(hit.id))
+            if aliased_cid in corpus_ids:
+                resolved.append((aliased_cid, hit))
+        if len(resolved) < len(corpus_ids):
             raise ValueError(
-                f"{q['query_id']}: only {len(in_corpus_hits)} of {len(corpus_ids)} "
+                f"{q['query_id']}: only {len(resolved)} of {len(corpus_ids)} "
                 "corpus docs ranked; widen the search limit")
-        for rank, hit in enumerate(in_corpus_hits[:len(corpus_ids)], start=1):
-            payload = hit.payload or {}
+        for rank, (cid, hit) in enumerate(resolved[:len(corpus_ids)], start=1):
             rows.append({
                 "run_id": run_id, "query_id": q["query_id"],
-                "candidate_id": f"{payload.get('type')}:{hit.id}",
+                "candidate_id": cid,
                 "rank": rank, "score": float(hit.score),
             })
     return rows
@@ -311,11 +361,12 @@ def _run_cli(out_dir: Path | None = None, corpus_version: str = common.DEFAULT_C
 
         vs = live_guard.read_only_vector_store()
         try:
-            payload_entities, stored_vectors = build_payload_entities(
+            payload_entities, stored_vectors, qdrant_id_aliases = build_payload_entities(
                 vs.client, cfg["collection"], corpus_docs)
+            alias_map = build_alias_map(corpus_docs)
             queries_graph = common.load_queries(QUERIES_GRAPH)
             graphq_rows = build_graphq_cosine_rows(
-                queries_graph, vs, corpus_ids, "vector_cosine_graphq_v1")
+                queries_graph, vs, corpus_ids, "vector_cosine_graphq_v1", alias_map=alias_map)
         finally:
             vs.close()
 
@@ -330,6 +381,7 @@ def _run_cli(out_dir: Path | None = None, corpus_version: str = common.DEFAULT_C
             "out_of_corpus_neighbors": len(outside_ids),
             "degree_histogram": _degree_histogram(merged_entities, merged_topics),
             "graph_counts": counts,
+            "qdrant_id_aliases": qdrant_id_aliases,
             "created_at": common.utc_now(),
             **common.git_state(),
         }
