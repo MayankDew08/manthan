@@ -116,8 +116,11 @@ class TestGraphExpandBehaviour:
         rows, _ = _expand(BASE_SEEDS, BASE_ADJ, set(), CORPUS)
 
         b = _by_id(rows)["B"]
-        assert b["score"] == pytest.approx(0.721347520 + 0.721347520 / 2, abs=1e-9)
-        assert b["score"] == pytest.approx(1.082021280, abs=1e-9)
+        # R2/I11: round once, after summing at full precision -- not per contribution.
+        # 1/ln4 + (1/ln4)/2 at full precision rounds to .082021281, not .082021280
+        # (rounding each term to 9 decimals first, then summing, gives .082021280).
+        assert b["score"] == pytest.approx(1.0 / math.log(4.0) + 1.0 / math.log(4.0) / 2, abs=1e-9)
+        assert b["score"] == pytest.approx(1.082021281, abs=1e-9)
         # The strongest single path is S1's.
         assert b["via"] == {"path": "entity", "connector": "rust", "seed": "S1"}
 
@@ -326,7 +329,7 @@ class TestGraphExpandBoundaries:
         rows, _ = _expand(BASE_SEEDS, BASE_ADJ, set(), CORPUS)
 
         assert "A" in _by_id(rows)          # from S1
-        assert _by_id(rows)["B"]["score"] == pytest.approx(1.082021280, abs=1e-9)  # S1+S2
+        assert _by_id(rows)["B"]["score"] == pytest.approx(1.082021281, abs=1e-9)  # S1+S2
 
     def test_U3_E9_an_eleventh_seed_is_never_used(self):
         seeds = [_seed(f"S{i:02d}", i) for i in range(1, 12)]
@@ -541,7 +544,7 @@ class TestGraphExpandAntiCheat:
         b3, _ = _expand(BASE_SEEDS, BASE_ADJ, set(), CORPUS)
 
         assert abs(b2[0]["score"] - 0.721347520) < 1e-9
-        assert abs(_by_id(b3)["B"]["score"] - 1.082021280) < 1e-9
+        assert abs(_by_id(b3)["B"]["score"] - 1.082021281) < 1e-9
         assert b2[0]["score"] == pytest.approx(1.0 / math.log(4.0), abs=1e-9)
         assert _by_id(b3)["B"]["score"] == pytest.approx(
             1.0 / math.log(4.0) + 1.0 / math.log(4.0) / 2.0, abs=1e-9)

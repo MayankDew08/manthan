@@ -245,7 +245,8 @@ class TestC2Behaviour:
         The contains hop (U3 B1) has no payload form, so it is not mirrored.
         Degree is the number of corpus docs carrying the string: "rust" is on
         S1, S2 and B (3); "agents" on S2 and C (2). Hand-computed:
-        B = 1/ln4 + (1/ln4)/2 = 1.082021280; C = (1/2) x 1/ln3 = 0.455119613.
+        B = 1/ln4 + (1/ln4)/2 = 1.082021281 (single-rounded, review #2 I11);
+        C = (1/2) x 1/ln3 = 0.455119613.
         """
         dc = _denorm()
         gx = _graph_expand()
@@ -273,7 +274,7 @@ class TestC2Behaviour:
         for got, want in zip(payload_rows, graph_rows):
             assert got["score"] == pytest.approx(want["score"], abs=1e-9)
         by_id = {r["candidate_id"]: r for r in payload_rows}
-        assert by_id["B"]["score"] == pytest.approx(1.082021280, abs=1e-9)
+        assert by_id["B"]["score"] == pytest.approx(1.082021281, abs=1e-9)
         assert by_id["C"]["score"] == pytest.approx(0.5 / math.log(3.0), abs=1e-9)
         assert [r["via"]["path"] for r in payload_rows] == \
                ["payload_entity", "payload_topic"]
