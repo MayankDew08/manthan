@@ -265,7 +265,7 @@ P1, P2 (owner)
                          U4 ───┘                                                        U7 (live) ──┘
 ```
 
-U3, U4 and U1 can run in parallel worktrees. U2 and U7 run on the owner's machine with the Drive listener stopped.
+U3, U4 and U1 can run in parallel worktrees. U2 and U7 run on the owner's machine with Neo4j and Qdrant up. They check that no Drive listener is running (`assert_listener_stopped`) and refuse to start if one is; the owner does nothing extra.
 
 ## 8. Gates
 
@@ -357,6 +357,7 @@ Designed with the owner, unit by unit. For each: behaviour, boundaries, failure 
 - R3: dead-end connectors (degree 1) are skipped and **counted**.
 - R4: B-q with fewer than `QUERY_NODES_K` usable nodes uses what's left and **records the count**.
 - Both counts go into the U5 run meta, per query.
+- R7 (approved 2026-10-26, review #3): a dead end is an adjacency edge `{"neighbor": None, "path": "entity|topic", "connector": <name>, "degree": 1}`. U5 adds one per seed for each degree-1 node in `graph_nodes_v1.jsonl` whose `corpus_doc_ids` contains the seed. U3 counts these edges as dead ends and returns nothing for them.
 
 | # | Kind | Test | Expected |
 |---|---|---|---|
@@ -397,6 +398,7 @@ Designed with the owner, unit by unit. For each: behaviour, boundaries, failure 
 **Rules agreed:**
 - R5: C1 glues message first, then link text trimmed at a word boundary to the 256-token budget.
 - R6: a corpus doc missing from `payload_entities_v1.json` raises.
+- R8 (approved 2026-10-26, review #3): C1 counters are per link. A link that keeps some but not all of its words counts toward `links_trimmed`. A link that keeps none counts toward `links_dropped_no_room`. Each separator costs 1 token.
 
 Tokenizer-dependent tests use the real embedder tokenizer under `--model`; the rest use an injected fake tokenizer (1 word = 1 token).
 
