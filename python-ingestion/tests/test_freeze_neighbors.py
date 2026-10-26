@@ -227,6 +227,9 @@ class TestFreezeNeighborsLive:
         assert calls[0] == "listener"
         assert "read" in calls
 
+        # Undo the stub above before exercising the real assert_listener_stopped
+        # with a fake process list -- it takes a procs kwarg the stub doesn't.
+        monkeypatch.undo()
         with pytest.raises(live_guard.LiveGuardError, match="listener"):
             live_guard.assert_listener_stopped(
                 procs={1234: "python -m drive_event_listener"})
