@@ -162,21 +162,19 @@ def expand_from_results(
     return rows[:cap], {"dead_ends": dead_ends}
 
 
-def expand_from_query(
+def select_start_nodes(
     query_vec: list[float] | np.ndarray,
     node_vecs: list[list[float]] | np.ndarray,
     nodes: list[dict[str, Any]],
-    exclude: set[str],
-    corpus: set[str],
     k: int = QUERY_NODES_K,
-    cap: int = NEIGHBOR_CAP,
     hub_rule: int = HUB_MAX_DEGREE,
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """Query-start expansion (B-q).
+) -> list[tuple[float, str, str, dict[str, Any]]]:
+    """B-q's start nodes: cosine desc, ties by (node_type, name), hubs removed first.
 
-    Returns ``(rows, stats)``: ``rows`` as above; ``stats`` is
-    ``{"bq_nodes_used": n}`` -- the number of start nodes actually used,
-    after hub removal (review #2 I4; D13).
+    Returns up to ``k`` ``(cosine, node_type, name, node)`` tuples. Exposed so a
+    caller building a connection note (``note_for_query``) can use exactly the
+    nodes and scores ``expand_from_query`` actually used, instead of
+    recomputing the selection and risking it diverging.
     """
     query_vec = np.asarray(query_vec, dtype=np.float64)
     node_vecs = np.asarray(node_vecs, dtype=np.float64)
@@ -198,7 +196,26 @@ def expand_from_query(
         usable.append((float(cosines[i]), node["node_type"], node["name"], node))
 
     usable.sort(key=lambda row: (-row[0], row[1], row[2]))
-    start_nodes = usable[:k]
+    return usable[:k]
+
+
+def expand_from_query(
+    query_vec: list[float] | np.ndarray,
+    node_vecs: list[list[float]] | np.ndarray,
+    nodes: list[dict[str, Any]],
+    exclude: set[str],
+    corpus: set[str],
+    k: int = QUERY_NODES_K,
+    cap: int = NEIGHBOR_CAP,
+    hub_rule: int = HUB_MAX_DEGREE,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Query-start expansion (B-q).
+
+    Returns ``(rows, stats)``: ``rows`` as above; ``stats`` is
+    ``{"bq_nodes_used": n}`` -- the number of start nodes actually used,
+    after hub removal (review #2 I4; D13).
+    """
+    start_nodes = select_start_nodes(query_vec, node_vecs, nodes, k, hub_rule)
     nodes_used = len(start_nodes)
 
     contributions: dict[str, list[tuple[float, str, str | None, None]]] = {}
