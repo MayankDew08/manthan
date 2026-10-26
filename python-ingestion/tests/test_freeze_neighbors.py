@@ -158,8 +158,9 @@ class TestFreezeNeighborsArtifacts:
         assert outside_rows, "no in_corpus=false rows: out-of-corpus neighbours were dropped"
         distinct_outside = {r["neighbor_id"] for r in outside_rows}
         assert len(distinct_outside) <= expected_outside
-        # The meta counts either neighbour rows or distinct outside docs.
-        assert meta["out_of_corpus_neighbors"] in (len(outside_rows), len(distinct_outside))
+        # Meta key contract (review #3 S4): out_of_corpus_neighbors counts DISTINCT
+        # out-of-corpus docs, not neighbour rows.
+        assert meta["out_of_corpus_neighbors"] == len(distinct_outside)
 
 
 class TestFreezeNeighborsUnit:

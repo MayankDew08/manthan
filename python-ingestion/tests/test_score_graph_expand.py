@@ -154,7 +154,7 @@ class TestScoreGraphExpandUnit:
         (7, 7, 0, True), (7, 6, 0, False),
         (6, 6, 0, True), (6, 5, 0, False),
         (5, 5, 0, True), (5, 4, 0, False),
-        (4, 4, 0, None),
+        (4, 4, 0, None), (3, 3, 0, None), (0, 0, 0, None),   # n <= 4: too few to decide
     ])
     def test_U8_B5_scoreboard_d16(self, n, wins, losses, expected):
         sge = _score_graph_expand()

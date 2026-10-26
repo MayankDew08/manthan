@@ -72,7 +72,10 @@ def _neighbors(*rows):
     return out
 
 
-NEIGHBORS = _neighbors(_contains("msg1", "link:b"), _contains("msg1", "link:a"))
+# D21: CONTAINS is written in both directions, so the link -> message rows are here too.
+NEIGHBORS = _neighbors(
+    _contains("msg1", "link:b"), _contains("msg1", "link:a"),
+    _contains("link:a", "msg1"), _contains("link:b", "msg1"))
 
 
 class TestTopupBUnit:

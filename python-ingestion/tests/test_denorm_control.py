@@ -1,9 +1,11 @@
 """U4 denorm_control: C1 glued texts and C2 payload expansion (section 13.2).
 
 Message-to-link relations come from the frozen ``graph_neighbors_v1.jsonl``
-CONTAINS rows the test builds by hand; a ``doc["links"]`` field is never used.
-Token-dependent tests inject a fake tokenizer (1 word = 1 token); C1-E5 uses
-the real embedder tokenizer under ``--model``.
+CONTAINS rows the test builds by hand, in both directions (D21); a
+``doc["links"]`` field is never used. ``denorm_texts`` is the one C1 function
+and returns ``(texts, meta)`` (review #3 S6). Token-dependent tests inject a
+fake tokenizer (1 word = 1 token); C1-A2 and C1-E5 use the real embedder
+tokenizer and run under ``--model``.
 """
 
 import math
@@ -11,7 +13,6 @@ import re
 import sys
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,9 +39,9 @@ def _doc(cid, kind="message", text="", title=None):
     return doc
 
 
-def _contains(msg_id, link_id, in_corpus=True):
-    """One frozen ``graph_neighbors_v1.jsonl`` CONTAINS row."""
-    return {"candidate_id": msg_id, "neighbor_id": link_id, "path": "contains",
+def _contains(src_id, dst_id, in_corpus=True):
+    """One frozen ``graph_neighbors_v1.jsonl`` CONTAINS row (either direction)."""
+    return {"candidate_id": src_id, "neighbor_id": dst_id, "path": "contains",
             "connector": None, "connector_degree": None, "in_corpus": in_corpus}
 
 
@@ -74,9 +75,9 @@ class TestC1Behaviour:
             "msg1": _doc("msg1", text="hello world"),
             "link:a": _doc("link:a", kind="link", text="alpha body", title="Alpha"),
         }
-        neighbors = _neighbors(_contains("msg1", "link:a"))
+        neighbors = _neighbors(_contains("msg1", "link:a"), _contains("link:a", "msg1"))
 
-        texts = dc.denorm_texts(docs, neighbors, tokenizer=WordTokenizer())
+        texts, _ = dc.denorm_texts(docs, neighbors, tokenizer=WordTokenizer())
 
         assert texts["msg1"] == "hello world alpha body"
         assert texts["link:a"] == "alpha body"
@@ -89,11 +90,17 @@ class TestC1Behaviour:
             "link:a": _doc("link:a", kind="link", text="alpha body", title="Alpha"),
         }
         # Frozen rows arrive in graph order; the output must be candidate_id order.
-        neighbors = _neighbors(_contains("msg1", "link:b"), _contains("msg1", "link:a"))
+        # The reverse (link -> message) rows are present too, as D21 writes them.
+        neighbors = _neighbors(
+            _contains("msg1", "link:b"), _contains("msg1", "link:a"),
+            _contains("link:a", "msg1"), _contains("link:b", "msg1"))
 
-        texts = dc.denorm_texts(docs, neighbors, tokenizer=WordTokenizer())
+        texts, _ = dc.denorm_texts(docs, neighbors, tokenizer=WordTokenizer())
 
         assert texts["msg1"] == "hello alpha body beta body"
+        # Links are unchanged, even with a link -> message row present.
+        assert texts["link:a"] == "alpha body"
+        assert texts["link:b"] == "beta body"
 
     def test_C1_B3_message_without_a_link_and_link_docs_are_unchanged(self):
         dc = _denorm()
@@ -102,7 +109,7 @@ class TestC1Behaviour:
             "link:a": _doc("link:a", kind="link", text="alpha body", title="Alpha"),
         }
 
-        texts = dc.denorm_texts(docs, {}, tokenizer=WordTokenizer())
+        texts, _ = dc.denorm_texts(docs, {}, tokenizer=WordTokenizer())
 
         assert texts["msg1"] == "just a message"
         assert texts["link:a"] == "alpha body"
@@ -114,9 +121,11 @@ class TestC1Boundaries:
         docs = {"msg1": _doc("msg1", text="hello")}
         neighbors = _neighbors(_contains("msg1", "link:outside", in_corpus=False))
 
-        texts = dc.denorm_texts(docs, neighbors, tokenizer=WordTokenizer())
+        texts, meta = dc.denorm_texts(docs, neighbors, tokenizer=WordTokenizer())
 
         assert texts["msg1"] == "hello"
+        assert meta["links_trimmed"] == 0
+        assert meta["links_dropped_no_room"] == 0
 
     def test_C1_E2_the_same_link_contained_twice_is_appended_once(self):
         dc = _denorm()
@@ -126,7 +135,7 @@ class TestC1Boundaries:
         }
         neighbors = _neighbors(_contains("msg1", "link:a"), _contains("msg1", "link:a"))
 
-        texts = dc.denorm_texts(docs, neighbors, tokenizer=WordTokenizer())
+        texts, _ = dc.denorm_texts(docs, neighbors, tokenizer=WordTokenizer())
 
         assert texts["msg1"] == "hello alpha body"
 
@@ -138,9 +147,10 @@ class TestC1Boundaries:
         }
         neighbors = _neighbors(_contains("msg1", "link:a"))
 
-        texts, meta = dc.denorm_texts_with_tokenizer(
-            docs, neighbors, WordTokenizer(), max_tokens=10)
+        texts, meta = dc.denorm_texts(
+            docs, neighbors, tokenizer=WordTokenizer(), max_tokens=10)
 
+        # Budget 10 - message 4 - separator 1 = 5 link tokens.
         assert texts["msg1"] == "m1 m2 m3 m4 l1 l2 l3 l4 l5"
         assert meta["links_trimmed"] == 1
         assert meta["links_dropped_no_room"] == 0
@@ -154,8 +164,8 @@ class TestC1Boundaries:
         }
         neighbors = _neighbors(_contains("msg1", "link:a"))
 
-        texts, meta = dc.denorm_texts_with_tokenizer(
-            docs, neighbors, WordTokenizer(), max_tokens=10)
+        texts, meta = dc.denorm_texts(
+            docs, neighbors, tokenizer=WordTokenizer(), max_tokens=10)
 
         assert texts["msg1"] == message
         assert meta["links_trimmed"] == 0
@@ -169,7 +179,7 @@ class TestC1Boundaries:
             common.data_dir(common.DEFAULT_CORPUS_VERSION) / "runs" / "graph_neighbors_v1.jsonl")
         neighbors = _neighbors(*[r for r in rows if r["path"] == "contains"])
 
-        texts = dc.denorm_texts(docs, neighbors)
+        texts, _ = dc.denorm_texts(docs, neighbors)
         tokenizer = dc._get_tokenizer()
 
         for cid, text in texts.items():
@@ -207,9 +217,12 @@ class TestC1FailuresAndAntiCheat:
 
         monkeypatch.setattr(socket, "socket", no_network)
         docs = {"msg1": _doc("msg1", text="hello")}
-        assert dc.denorm_texts(docs, {}, tokenizer=WordTokenizer()) == {"msg1": "hello"}
+        texts, _ = dc.denorm_texts(docs, {}, tokenizer=WordTokenizer())
+        assert texts == {"msg1": "hello"}
 
-    def test_C1_A2_runs_offline(self, monkeypatch):
+    @pytest.mark.model
+    def test_C1_A2_runs_offline_with_the_real_embedder(self, monkeypatch):
+        """Real tokenizer and embedder from the local cache; no socket may open."""
         dc = _denorm()
         monkeypatch.setenv("HF_HUB_OFFLINE", "1")
 
@@ -220,8 +233,9 @@ class TestC1FailuresAndAntiCheat:
 
         monkeypatch.setattr(socket, "socket", no_network)
 
-        docs = {"msg1": _doc("msg1", text="hello")}
-        assert dc.denorm_texts(docs, {}, tokenizer=WordTokenizer()) == {"msg1": "hello"}
+        docs = {"msg1": _doc("msg1", text="hello world")}
+        texts, _ = dc.denorm_texts(docs, {})
+        assert texts == {"msg1": "hello world"}
 
 
 class TestC2Behaviour:
@@ -284,6 +298,10 @@ class TestC2Behaviour:
         assert all(r["via"]["connector"] == "ai development" for r in rows)
 
     def test_C2_B3_a_string_carried_by_17_corpus_docs_is_a_hub(self):
+        """Degree = corpus docs carrying the string, seed included.
+
+        17 docs = degree 17 > 16, skipped. 16 docs = degree 16, kept.
+        """
         dc = _denorm()
         names17 = [f"d{i}" for i in range(17)]
         payload17 = {n: {"entities": ["hub"], "topics": []} for n in names17}

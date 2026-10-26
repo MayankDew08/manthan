@@ -276,7 +276,7 @@ class TestRunGraphExpandUnit:
 
         monkeypatch.setattr(rge.run_bm25, "bm25_rows", fake_bm25_rows)
         reranker = FakeReranker()
-        runs, _ = _build(fx, monkeypatch, reranker, embed_batch=fake_embed_batch)
+        runs, counters = _build(fx, monkeypatch, reranker, embed_batch=fake_embed_batch)
 
         # BM25 and the re-ranker see the full glued text (message + long link).
         # C1's BM25 call is the one that sees glued text; check every call made.
@@ -290,22 +290,83 @@ class TestRunGraphExpandUnit:
             for _cid, text in candidates
         )
 
-        # The embedder sees the trimmed text: 256 tokens or fewer.
-        embedded_f01 = [t for t in embedded if t.startswith("filler alpha")]
-        assert embedded_f01
-        trimmed = min(embedded_f01, key=len)
-        assert len(trimmed.split()) <= 256
-        assert trimmed.count("l1") < full_f01.count("l1")
+        # The embedder gets f01's trimmed text, identified by its content: l1 is
+        # contained only by f01. Budget 256 = 2 message words + 1 separator + 253 link words.
+        f01_inputs = [t for t in embedded if t.startswith("filler alpha l1")]
+        assert f01_inputs == ["filler alpha " + " ".join(["l1"] * 253)]
 
-    def test_U5_F1_input_sha_mismatch_raises_before_building(self, tmp_path):
+        # R8: l1 keeps some of its words (trimmed); l2 keeps none (dropped). Only f01 has links.
+        c1 = counters["ctrl_c1_denorm_rr"]["q1"]
+        assert c1["links_trimmed"] == 1
+        assert c1["links_dropped_no_room"] == 1
+
+    def test_U5_B9_a_degree_1_connector_counts_one_dead_end(self, monkeypatch):
+        # R7: the seed f01 is the only doc on this degree-1 node, so it is one dead end.
+        fx = _fixture()
+        fx["nodes"] = fx["nodes"] + [
+            {"node_type": "entity", "name": "lonely", "degree": 1, "corpus_doc_ids": ["f01"]}]
+        fx["node_vecs"] = np.vstack([fx["node_vecs"], [[0.5, 0.5]]]).astype(np.float32)
+
+        _, counters = _build(fx, monkeypatch)
+
+        assert counters["graph_b1r_rr"]["q1"]["dead_ends"] == 1
+
+    def test_U5_B10_b2_reranker_input_is_the_connected_prefix_only_where_noted(self, monkeypatch):
+        fx = _fixture()
+        reranker = FakeReranker()
+        runs, _ = _build(fx, monkeypatch, reranker)
+        plain = {cid: doc["embedded_text"] for cid, doc in fx["docs"].items()}
+
+        notes_r = {r["candidate_id"]: r["note"] for r in _rows_for(runs, "graph_b2r_ctx_rr")
+                   if r["note"] is not None}
+        notes_q = {r["candidate_id"]: r["note"] for r in _rows_for(runs, "graph_b2q_ctx_rr")
+                   if r["note"] is not None}
+        assert notes_r and notes_q, "both B2 systems must have noted docs"
+
+        # One re-rank call per system (section 4 has 8). Only the two B2 calls carry
+        # the "[connected: " prefix; C1's glued text is not a connection note.
+        assert len(reranker.calls) == 8
+
+        carrying = []
+        for _query, candidates in reranker.calls:
+            tagged = {(cid, text) for cid, text in candidates
+                      if text.startswith("[connected: ")}
+            if tagged:
+                carrying.append(tagged)
+        assert len(carrying) == 2
+
+        def connected(cid, note):
+            return (cid, "[connected: " + note + "] " + plain[cid])
+
+        expected = [
+            {connected(cid, note) for cid, note in notes_r.items()},
+            {connected(cid, note) for cid, note in notes_q.items()},
+        ]
+        # Each B2 call tags exactly its noted docs, with the note and the plain text.
+        assert sorted(map(sorted, carrying)) == sorted(map(sorted, expected))
+
+    def test_U5_F1_build_checks_every_frozen_input_before_writing(self, tmp_path):
+        """Interface: build_from_frozen(data_dir, expected_sha256) hashes each named
+        input under data_dir, raises ValueError naming the first mismatch, and writes
+        no run file under data_dir/runs."""
         rge = _run_graph_expand()
-        path = tmp_path / "documents.jsonl"
-        path.write_text('{"candidate_id": "m1"}\n', encoding="utf-8")
-        good = hashlib.sha256(path.read_bytes()).hexdigest()
+        data = tmp_path / "data"
+        data.mkdir()
+        names = ["documents.jsonl", "graph_neighbors_v1.jsonl",
+                 "graph_nodes_v1.jsonl", "payload_entities_v1.json"]
+        for name in names:
+            (data / name).write_bytes(f"frozen {name}\n".encode("utf-8"))
+        expected = {name: hashlib.sha256((data / name).read_bytes()).hexdigest()
+                    for name in names}
+        # One frozen input changes on disk after its sha was recorded.
+        (data / "graph_neighbors_v1.jsonl").write_bytes(b"altered\n")
 
-        rge._assert_file_sha(path, good, "documents")
-        with pytest.raises(ValueError, match="documents"):
-            rge._assert_file_sha(path, "0" * 64, "documents")
+        with pytest.raises(ValueError, match="graph_neighbors_v1.jsonl"):
+            rge.build_from_frozen(data, expected)
+
+        runs = data / "runs"
+        assert not runs.exists() or not any(runs.iterdir()), \
+            "a sha mismatch must stop the build before any run file is written"
 
     def test_U5_F2_reranker_pin_is_enforced(self, monkeypatch):
         rge = _run_graph_expand()
@@ -323,7 +384,6 @@ class TestRunGraphExpandUnit:
         assert "qdrant_client" not in source
         assert "live_guard" not in source
 
-    @pytest.mark.artifacts
     def test_U5_A2_building_twice_is_identical(self, monkeypatch):
         fx = _fixture()
         first, first_counters = _build(fx, monkeypatch)

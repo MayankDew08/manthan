@@ -67,21 +67,20 @@ BASE_ADJ = {
     "S1": [
         _edge("A", "contains"),
         _edge("B", "entity", "rust", 3),
-        _edge("dead1", "entity", "llm", 1),
+        _edge(None, "entity", "llm", 1),     # dead end (R7): no neighbour
     ],
     "S2": [
         _edge("B", "entity", "rust", 3),
         _edge("C", "topic", "agents", 17),
     ],
 }
-CORPUS = {"S1", "S2", "A", "B", "C", "dead1"}
+CORPUS = {"S1", "S2", "A", "B", "C"}
 DOCS = {
     "S1": _doc("S1", text="seed one"),
     "S2": _doc("S2", text="seed two"),
     "A": _doc("A"),
     "B": _doc("B"),
     "C": _doc("C"),
-    "dead1": _doc("dead1"),
 }
 
 # Review #1: B2 and B3 contradicted each other on one fixture. B2 gets a
@@ -196,8 +195,30 @@ class TestGraphExpandBehaviour:
 
         assert gx.note_for("A", ["S1", "S2"], BASE_ADJ, DOCS) is not None
         assert gx.note_for("B", ["S1", "S2"], BASE_ADJ, DOCS) is not None
-        assert gx.note_for("C", ["S1", "S2"], BASE_ADJ, DOCS) is not None
+        # C is reached only through topic "agents" (degree 17): a hub, so no note (I6).
+        assert gx.note_for("C", ["S1", "S2"], BASE_ADJ, DOCS) is None
         assert gx.note_for("Z", ["S1", "S2"], BASE_ADJ, DOCS) is None
+
+    def test_U3_B11_query_start_score_and_via_by_hand(self):
+        # Start nodes: rust (entity, degree 3, cos 0.8) and agents (topic, degree 2, cos 0.6).
+        # Unit vectors, so cos(query=[1,0], node) is the first coordinate.
+        # Hand values: D gets 0.8 x 1/ln4 + 0.6 x 1/ln3; E gets 0.6 x 1/ln3.
+        nodes = [
+            {"node_type": "entity", "name": "rust", "degree": 3, "corpus_doc_ids": ["D"]},
+            {"node_type": "topic", "name": "agents", "degree": 2, "corpus_doc_ids": ["D", "E"]},
+        ]
+        node_vecs = np.array([[0.8, 0.6], [0.6, 0.8]], dtype=np.float64)
+        q = np.array([1.0, 0.0], dtype=np.float64)
+
+        rows, _ = _expand_q(q, node_vecs, nodes, set(), {"D", "E"}, k=2)
+        got = _by_id(rows)
+
+        expected_d = 0.8 / math.log(4.0) + 0.6 / math.log(3.0)
+        assert got["D"]["score"] == pytest.approx(expected_d, abs=1e-9)
+        assert got["E"]["score"] == pytest.approx(0.6 / math.log(3.0), abs=1e-9)
+        # D's strongest single path is rust (0.5771 > 0.5461).
+        assert got["D"]["via"] == {"path": "query_entity", "connector": "rust", "seed": None}
+        assert got["E"]["via"] == {"path": "query_topic", "connector": "agents", "seed": None}
 
     def test_U3_B9_note_wording_and_labels(self):
         gx = _graph_expand()
@@ -266,7 +287,7 @@ class TestGraphExpandBoundaries:
     def test_U3_E3_degree_1_yields_nothing_and_counts_one_dead_end(self):
         rows, stats = _expand(BASE_SEEDS, BASE_ADJ, set(), CORPUS)
 
-        assert "dead1" not in _by_id(rows)
+        assert set(_by_id(rows)) == {"A", "B"}
         assert stats["dead_ends"] == 1
 
     def test_U3_E4_a_seed_is_never_returned_as_a_neighbour(self):
@@ -414,13 +435,14 @@ class TestGraphExpandReviewTwo:
             gx.load_node_vectors(path, sha)
 
     def test_U3_I4_dead_end_count_is_returned_not_discarded(self):
+        # Dead ends are edges with neighbor None (R7), one per degree-1 connector.
         adj = {"S1": [
-            _edge("x1", "entity", "d1", 1),
-            _edge("x2", "entity", "d2", 1),
-            _edge("x3", "topic", "d3", 1),
+            _edge(None, "entity", "d1", 1),
+            _edge(None, "entity", "d2", 1),
+            _edge(None, "topic", "d3", 1),
             _edge("A", "contains"),
         ]}
-        rows, stats = _expand([_seed("S1", 1)], adj, set(), {"S1", "A", "x1", "x2", "x3"})
+        rows, stats = _expand([_seed("S1", 1)], adj, set(), {"S1", "A"})
 
         assert [r["candidate_id"] for r in rows] == ["A"]
         assert stats["dead_ends"] == 3
