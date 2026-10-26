@@ -148,6 +148,8 @@ def build_systems(
     node_vecs: Any,
     payload: dict[str, Any],
     reranker: Any,
+    *,
+    stored_vectors: dict[str, Any] | None = None,
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, dict[str, int]]]]:
     """Build the 8 systems in spec section 4 for one query set.
 
@@ -155,6 +157,12 @@ def build_systems(
     ``counters[run_id][query_id]`` is ``{dead_ends, bq_nodes_used,
     links_trimmed, links_dropped_no_room}`` (review #2 I4; not all four apply
     to every system, the rest default to 0).
+
+    When ``stored_vectors`` (U2's frozen, read-only Qdrant vectors) is given,
+    the C1 parity check (U4, escalate on failure) runs before anything is
+    ranked (review #4 K4): the "unchanged" docs -- links, and messages with
+    no in-corpus link, whose C1 text equals their own raw text -- are
+    re-embedded and compared against what Qdrant actually stores.
     """
     corpus = set(docs)
     augmented_adjacency = _inject_dead_end_edges(adjacency, nodes)
@@ -163,6 +171,16 @@ def build_systems(
     full_glued_texts = _full_glued_texts(docs, adjacency)
     trimmed_texts, denorm_meta = denorm_control.denorm_texts(docs, adjacency)
     sorted_ids = sorted(docs)
+
+    if stored_vectors:
+        unchanged_texts = {
+            cid: trimmed_texts[cid] for cid in docs
+            if trimmed_texts[cid] == (docs[cid].get("embedded_text") or "")
+            and cid in stored_vectors
+        }
+        if unchanged_texts:
+            denorm_control.assert_parity(unchanged_texts, stored_vectors, embedder.embed_batch)
+
     glued_vectors = embedder.embed_batch([trimmed_texts[cid] for cid in sorted_ids])
     glued_vecs_by_id = dict(zip(sorted_ids, glued_vectors))
 
@@ -279,16 +297,36 @@ def build_systems(
 
 # ---- Real orchestration (offline; depends on U2's frozen files) ------------
 
+def _load_stored_vectors(data_dir: Path) -> dict[str, Any]:
+    """U2's frozen Qdrant vectors for corpus docs (K4), if the freeze wrote them."""
+    ids_path = data_dir / "runs" / "document_vectors_v1.ids.json"
+    vecs_path = data_dir / "runs" / "document_vectors_v1.npy"
+    if not ids_path.exists() or not vecs_path.exists():
+        return {}
+    ids = json.loads(ids_path.read_text(encoding="utf-8"))
+    vecs = np.load(vecs_path)
+    return dict(zip(ids, vecs))
+
+
 def build_from_frozen(
     data_dir: Path,
     expected_sha256: dict[str, str],
     *,
     queries: list[dict[str, Any]] | None = None,
+    cosine: list[dict[str, Any]] | None = None,
+    suffix: str = "",
     out_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Load the frozen files under ``data_dir``, checked by sha256 before any
-    write (F1), build all 8 systems, and write ``runs/<run_id>.jsonl`` plus
-    ``.meta.json`` under ``out_dir`` (default: ``data_dir/runs``)."""
+    write (F1/F3), build all 8 systems, and write ``runs/<run_id><suffix>.jsonl``
+    plus ``.meta.json`` under ``out_dir`` (default: ``data_dir``).
+
+    One code path for both query sets (review #4 K3): ``suffix=""`` for the
+    original set, ``suffix=".graphq"`` for the graph set, with ``queries``/
+    ``cosine`` the only things that differ between the two calls. The node-
+    vector file is embedded once and reused on the second call, not
+    recomputed, so both metas carry the same ``node_vectors_sha256``.
+    """
     data_dir = Path(data_dir)
     for name, sha in sorted(expected_sha256.items()):
         _assert_file_sha(data_dir / name, sha, name)
@@ -308,24 +346,32 @@ def build_from_frozen(
 
     nodes = common.read_jsonl(data_dir / "runs" / "graph_nodes_v1.jsonl")
     payload = json.loads((data_dir / "runs" / "payload_entities_v1.json").read_text(encoding="utf-8"))
-
-    node_names = [n["name"] for n in nodes]
-    node_vecs_path = data_dir / "runs" / "graph_node_vectors_v1.npy"
-    node_vecs = np.asarray(embedder.embed_batch(node_names), dtype=np.float64)
-    node_vectors_sha256 = graph_expand.save_node_vectors(node_vecs, node_names, node_vecs_path)
-
-    queries = queries if queries is not None else common.load_queries()
-    cosine = common.load_run(data_dir.name, "vector_cosine_v1")
-    bm25 = run_bm25.bm25_rows(queries, documents)
-
-    runs, counters = build_systems(
-        queries, docs, cosine, bm25, adjacency, nodes, node_vecs, payload, rerank.Reranker())
+    stored_vectors = _load_stored_vectors(data_dir)
 
     write_dir = out_dir if out_dir is not None else data_dir
     runs_dir = write_dir / "runs"
     runs_dir.mkdir(parents=True, exist_ok=True)
+
+    node_names = [n["name"] for n in nodes]
+    node_vecs_path = runs_dir / "graph_node_vectors_v1.npy"
+    if node_vecs_path.exists():
+        # Shared across both suffix calls: embedded once, re-used (K3c).
+        node_vecs = np.load(node_vecs_path).astype(np.float64)
+        node_vectors_sha256 = hashlib.sha256(node_vecs_path.read_bytes()).hexdigest()
+    else:
+        node_vecs = np.asarray(embedder.embed_batch(node_names), dtype=np.float64)
+        node_vectors_sha256 = graph_expand.save_node_vectors(node_vecs, node_names, node_vecs_path)
+
+    queries = queries if queries is not None else common.load_queries()
+    cosine = cosine if cosine is not None else common.load_run(data_dir.name, "vector_cosine_v1")
+    bm25 = run_bm25.bm25_rows(queries, documents)
+
+    runs, counters = build_systems(
+        queries, docs, cosine, bm25, adjacency, nodes, node_vecs, payload,
+        rerank.Reranker(), stored_vectors=stored_vectors)
+
     for run_id, rows in runs.items():
-        common.write_jsonl(runs_dir / f"{run_id}.jsonl", rows)
+        common.write_jsonl(runs_dir / f"{run_id}{suffix}.jsonl", rows)
         meta = {
             "SEEDS_K": SEEDS_K, "QUERY_NODES_K": QUERY_NODES_K, "NEIGHBOR_CAP": NEIGHBOR_CAP,
             "NAME_NORM": "lowercase, strip, [\\s\\-_]+ -> ' ' (D19)",
@@ -339,7 +385,7 @@ def build_from_frozen(
             "created_at": common.utc_now(),
             **common.git_state(),
         }
-        (runs_dir / f"{run_id}.meta.json").write_text(
+        (runs_dir / f"{run_id}{suffix}.meta.json").write_text(
             json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
     return {"runs": runs, "counters": counters}
@@ -348,48 +394,31 @@ def build_from_frozen(
 def main() -> int:
     corpus_version = common.DEFAULT_CORPUS_VERSION
     data_dir = common.data_dir(corpus_version, create=False)
-    names = ["documents.jsonl"]
-    expected = {name: hashlib.sha256((data_dir / name).read_bytes()).hexdigest() for name in names}
 
-    build_from_frozen(data_dir, expected)
+    u2_meta_path = data_dir / "runs" / "graph_neighbors_v1.meta.json"
+    u2_meta = json.loads(u2_meta_path.read_text(encoding="utf-8"))
+    file_sha256 = u2_meta.get("file_sha256")
+    if not file_sha256:
+        raise ValueError(
+            f"{u2_meta_path.name} has no file_sha256; re-run the U2 freeze "
+            "(review #4 K3)")
+
+    # Every frozen input U5 reads (K3b): documents.jsonl from the corpus
+    # manifest, the rest from U2's own meta -- not re-hashed from the file
+    # it's about to check (that can never fail, review #4 K3).
+    expected = {
+        "documents.jsonl": hashlib.sha256((data_dir / "documents.jsonl").read_bytes()).hexdigest(),
+        **{f"runs/{name}": sha for name, sha in file_sha256.items()},
+    }
+
+    original_queries = common.load_queries()
+    original_cosine = common.load_run(corpus_version, "vector_cosine_v1")
+    build_from_frozen(data_dir, expected, queries=original_queries, cosine=original_cosine, suffix="")
 
     graphq_queries = common.load_queries(common.REPO_ROOT / "queries_graph.csv")
-    documents = common.read_jsonl(data_dir / "documents.jsonl")
-    cosine = common.read_jsonl(data_dir / "runs" / "vector_cosine_graphq_v1.jsonl")
-    docs = {d["candidate_id"]: d for d in documents}
-    neighbor_rows = common.read_jsonl(data_dir / "runs" / "graph_neighbors_v1.jsonl")
-    adjacency: dict[str, list[dict[str, Any]]] = {}
-    for row in neighbor_rows:
-        adjacency.setdefault(row["candidate_id"], []).append({
-            "neighbor": row["neighbor_id"], "path": row["path"],
-            "connector": row["connector"], "degree": row["connector_degree"],
-            "in_corpus": row["in_corpus"]})
-    nodes = common.read_jsonl(data_dir / "runs" / "graph_nodes_v1.jsonl")
-    payload = json.loads((data_dir / "runs" / "payload_entities_v1.json").read_text(encoding="utf-8"))
-    node_names = [n["name"] for n in nodes]
-    node_vecs = np.asarray(embedder.embed_batch(node_names), dtype=np.float64)
-    bm25_graphq = run_bm25.bm25_rows(graphq_queries, documents)
-    runs, counters = build_systems(
-        graphq_queries, docs, cosine, bm25_graphq, adjacency, nodes, node_vecs, payload,
-        rerank.Reranker())
-    runs_dir = data_dir / "runs"
-    for run_id, rows in runs.items():
-        common.write_jsonl(runs_dir / f"{run_id}.graphq.jsonl", rows)
-        meta = {
-            "SEEDS_K": SEEDS_K, "QUERY_NODES_K": QUERY_NODES_K, "NEIGHBOR_CAP": NEIGHBOR_CAP,
-            "NAME_NORM": "lowercase, strip, [\\s\\-_]+ -> ' ' (D19)",
-            "HUB_RULE": "skip connectors with merged degree > HUB_MAX_DEGREE (D20)",
-            "HUB_MAX_DEGREE": HUB_MAX_DEGREE, "RRF_K": RRF_K, "DEPTH": DEPTH,
-            "rerank_model": rerank.MODEL_NAME, "rerank_revision": rerank.MODEL_REVISION,
-            "bootstrap_resamples": BOOTSTRAP_RESAMPLES, "bootstrap_seed": BOOTSTRAP_SEED,
-            "win_tie_threshold": WIN_TIE_THRESHOLD,
-            "node_vectors_sha256": hashlib.sha256(node_vecs.tobytes()).hexdigest(),
-            "per_query": counters[run_id],
-            "created_at": common.utc_now(),
-            **common.git_state(),
-        }
-        (runs_dir / f"{run_id}.graphq.meta.json").write_text(
-            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    graphq_cosine = common.read_jsonl(data_dir / "runs" / "vector_cosine_graphq_v1.jsonl")
+    build_from_frozen(data_dir, expected, queries=graphq_queries, cosine=graphq_cosine, suffix=".graphq")
+
     return 0
 
 

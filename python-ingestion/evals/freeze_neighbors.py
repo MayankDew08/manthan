@@ -14,10 +14,13 @@ and raises if anything changed. Writes:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
 from typing import Any, Callable
+
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -213,38 +216,48 @@ def build_node_rows(
 
 # ---- Live Qdrant read -------------------------------------------------------
 
-def build_payload_entities(client, collection: str, corpus_docs: list[dict[str, Any]]) -> dict[str, Any]:
-    """Scroll the collection; keep only corpus points, keyed by candidate_id.
+def build_payload_entities(
+    client, collection: str, corpus_docs: list[dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, list[float]]]:
+    """Scroll the collection once; keep only corpus points, keyed by candidate_id.
+
+    Returns ``(payload_entities, stored_vectors)``: the entities/topics payload
+    (review #4 K4: ``stored_vectors`` lets U5's C1 parity check compare a
+    re-embedded unchanged doc against what Qdrant actually stores, offline,
+    without a second live scroll).
 
     Raises if a corpus doc's own ``qdrant_point_id`` is missing from the live
     collection -- the manifest and the live store have drifted; escalate,
     don't silently write a short file (spec section 10).
     """
     by_point_id = {d["qdrant_point_id"]: d["candidate_id"] for d in corpus_docs}
-    out: dict[str, Any] = {}
+    payload_out: dict[str, Any] = {}
+    vectors_out: dict[str, list[float]] = {}
     offset = None
     while True:
         points, offset = client.scroll(
             collection_name=collection, limit=256, offset=offset, with_payload=True,
-            with_vectors=False)
+            with_vectors=True)
         for point in points:
             cid = by_point_id.get(str(point.id))
             if cid is None:
                 continue
             payload = point.payload or {}
-            out[cid] = {
+            payload_out[cid] = {
                 "entities": payload.get("entities") or [],
                 "topics": payload.get("topics") or [],
             }
+            if point.vector is not None:
+                vectors_out[cid] = list(point.vector)
         if offset is None:
             break
 
-    missing = sorted(set(by_point_id.values()) - set(out))
+    missing = sorted(set(by_point_id.values()) - set(payload_out))
     if missing:
         raise ValueError(
             f"{len(missing)} corpus doc(s) not found in the live Qdrant collection "
             f"by their own qdrant_point_id (manifest/live-store drift): {missing}")
-    return out
+    return payload_out, vectors_out
 
 
 def build_graphq_cosine_rows(
@@ -298,7 +311,8 @@ def _run_cli(out_dir: Path | None = None, corpus_version: str = common.DEFAULT_C
 
         vs = live_guard.read_only_vector_store()
         try:
-            payload_entities = build_payload_entities(vs.client, cfg["collection"], corpus_docs)
+            payload_entities, stored_vectors = build_payload_entities(
+                vs.client, cfg["collection"], corpus_docs)
             queries_graph = common.load_queries(QUERIES_GRAPH)
             graphq_rows = build_graphq_cosine_rows(
                 queries_graph, vs, corpus_ids, "vector_cosine_graphq_v1")
@@ -329,6 +343,23 @@ def _run_cli(out_dir: Path | None = None, corpus_version: str = common.DEFAULT_C
             (runs_dir / "payload_entities_v1.json").write_text(
                 json.dumps(payload_entities, ensure_ascii=False, indent=2), encoding="utf-8")
             common.write_jsonl(runs_dir / "vector_cosine_graphq_v1.jsonl", graphq_rows)
+            # K4: the stored Qdrant vectors for corpus docs, so U5's C1 parity
+            # check can run offline against what Qdrant actually holds.
+            ordered_ids = sorted(stored_vectors)
+            (runs_dir / "document_vectors_v1.ids.json").write_text(
+                json.dumps(ordered_ids, ensure_ascii=False, indent=2), encoding="utf-8")
+            np.save(runs_dir / "document_vectors_v1.npy",
+                    np.asarray([stored_vectors[cid] for cid in ordered_ids], dtype=np.float64))
+
+            # K3a: the sha256 of every file this freeze writes, for U5 to check
+            # before it builds anything (K3b), for either query set (K3c).
+            file_sha256 = {}
+            for name in ("graph_neighbors_v1.jsonl", "graph_nodes_v1.jsonl",
+                         "payload_entities_v1.json", "vector_cosine_graphq_v1.jsonl",
+                         "document_vectors_v1.npy", "document_vectors_v1.ids.json"):
+                file_sha256[name] = hashlib.sha256((runs_dir / name).read_bytes()).hexdigest()
+            meta["file_sha256"] = file_sha256
+
             (runs_dir / "graph_neighbors_v1.meta.json").write_text(
                 json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
