@@ -7,6 +7,7 @@ from the frozen ``graph_neighbors_v1.jsonl`` CONTAINS rows, never from a
 
 import json
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -265,4 +266,6 @@ class TestTopupBUnit:
         assert "topup." in source
         assert "topup.topup_rows" in source or "topup.unjudged_pairs" in source
         assert "def topup_rows" not in source
-        assert "def merge_qrels" not in source
+        # A literal copy of topup.py's own merge_qrels, not a differently-named
+        # sibling (this unit's merge_qrels_v3 has a different signature/job).
+        assert not re.search(r"^def merge_qrels\s*\(", source, re.M)
