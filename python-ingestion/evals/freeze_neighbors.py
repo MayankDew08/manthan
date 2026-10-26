@@ -353,11 +353,18 @@ def _run_cli(out_dir: Path | None = None, corpus_version: str = common.DEFAULT_C
 
             # K3a: the sha256 of every file this freeze writes, for U5 to check
             # before it builds anything (K3b), for either query set (K3c).
+            # documents.jsonl isn't written by this freeze, but U5 checks its
+            # hash too (review #5 P5): recording it here means that check is
+            # against a hash taken at freeze time, not against the same file
+            # a moment before reading it (which could never fail).
             file_sha256 = {}
             for name in ("graph_neighbors_v1.jsonl", "graph_nodes_v1.jsonl",
                          "payload_entities_v1.json", "vector_cosine_graphq_v1.jsonl",
                          "document_vectors_v1.npy", "document_vectors_v1.ids.json"):
                 file_sha256[name] = hashlib.sha256((runs_dir / name).read_bytes()).hexdigest()
+            documents_path = (out_dir if out_dir is not None else
+                              common.data_dir(corpus_version)) / "documents.jsonl"
+            file_sha256["documents.jsonl"] = hashlib.sha256(documents_path.read_bytes()).hexdigest()
             meta["file_sha256"] = file_sha256
 
             (runs_dir / "graph_neighbors_v1.meta.json").write_text(

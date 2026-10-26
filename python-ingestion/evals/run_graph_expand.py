@@ -298,11 +298,15 @@ def build_systems(
 # ---- Real orchestration (offline; depends on U2's frozen files) ------------
 
 def _load_stored_vectors(data_dir: Path) -> dict[str, Any]:
-    """U2's frozen Qdrant vectors for corpus docs (K4), if the freeze wrote them."""
+    """U2's frozen Qdrant vectors for corpus docs (K4). Required for the C1
+    parity check; a missing file raises instead of silently skipping it
+    (review #5 P6)."""
     ids_path = data_dir / "runs" / "document_vectors_v1.ids.json"
     vecs_path = data_dir / "runs" / "document_vectors_v1.npy"
     if not ids_path.exists() or not vecs_path.exists():
-        return {}
+        raise ValueError(
+            f"missing document_vectors_v1.npy/.ids.json under {data_dir / 'runs'}; "
+            "re-run the U2 freeze (the C1 parity check needs the stored vectors)")
     ids = json.loads(ids_path.read_text(encoding="utf-8"))
     vecs = np.load(vecs_path)
     return dict(zip(ids, vecs))
@@ -315,6 +319,8 @@ def build_from_frozen(
     queries: list[dict[str, Any]] | None = None,
     cosine: list[dict[str, Any]] | None = None,
     suffix: str = "",
+    node_vecs: Any = None,
+    node_vectors_sha256: str | None = None,
     out_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Load the frozen files under ``data_dir``, checked by sha256 before any
@@ -323,9 +329,12 @@ def build_from_frozen(
 
     One code path for both query sets (review #4 K3): ``suffix=""`` for the
     original set, ``suffix=".graphq"`` for the graph set, with ``queries``/
-    ``cosine`` the only things that differ between the two calls. The node-
-    vector file is embedded once and reused on the second call, not
-    recomputed, so both metas carry the same ``node_vectors_sha256``.
+    ``cosine`` the only things that differ between the two calls.
+
+    ``node_vecs``/``node_vectors_sha256`` let a caller (``main``) embed the
+    node names once and pass the same vectors to both calls. Left out, the
+    node names are embedded fresh here -- never from a cached file on disk,
+    which could silently be stale (review #5 P5).
     """
     data_dir = Path(data_dir)
     for name, sha in sorted(expected_sha256.items()):
@@ -352,15 +361,16 @@ def build_from_frozen(
     runs_dir = write_dir / "runs"
     runs_dir.mkdir(parents=True, exist_ok=True)
 
-    node_names = [n["name"] for n in nodes]
-    node_vecs_path = runs_dir / "graph_node_vectors_v1.npy"
-    if node_vecs_path.exists():
-        # Shared across both suffix calls: embedded once, re-used (K3c).
-        node_vecs = np.load(node_vecs_path).astype(np.float64)
-        node_vectors_sha256 = hashlib.sha256(node_vecs_path.read_bytes()).hexdigest()
-    else:
+    if node_vecs is None:
+        node_names = [n["name"] for n in nodes]
         node_vecs = np.asarray(embedder.embed_batch(node_names), dtype=np.float64)
-        node_vectors_sha256 = graph_expand.save_node_vectors(node_vecs, node_names, node_vecs_path)
+        node_vectors_sha256 = graph_expand.save_node_vectors(
+            node_vecs, node_names, runs_dir / "graph_node_vectors_v1.npy")
+    else:
+        node_vecs = np.asarray(node_vecs, dtype=np.float64)
+        if node_vectors_sha256 is None:
+            node_vectors_sha256 = graph_expand.save_node_vectors(
+                node_vecs, [n["name"] for n in nodes], runs_dir / "graph_node_vectors_v1.npy")
 
     queries = queries if queries is not None else common.load_queries()
     cosine = cosine if cosine is not None else common.load_run(data_dir.name, "vector_cosine_v1")
@@ -403,21 +413,30 @@ def main() -> int:
             f"{u2_meta_path.name} has no file_sha256; re-run the U2 freeze "
             "(review #4 K3)")
 
-    # Every frozen input U5 reads (K3b): documents.jsonl from the corpus
-    # manifest, the rest from U2's own meta -- not re-hashed from the file
-    # it's about to check (that can never fail, review #4 K3).
+    # Every frozen input U5 reads (K3b), all from U2's own meta -- including
+    # documents.jsonl's hash, taken at freeze time, not re-hashed from the
+    # same file a moment before reading it (that can never fail; review #5 P5).
     expected = {
-        "documents.jsonl": hashlib.sha256((data_dir / "documents.jsonl").read_bytes()).hexdigest(),
-        **{f"runs/{name}": sha for name, sha in file_sha256.items()},
+        "documents.jsonl": file_sha256["documents.jsonl"],
+        **{f"runs/{name}": sha for name, sha in file_sha256.items() if name != "documents.jsonl"},
     }
+
+    # Embedded once, passed to both calls -- never read back from disk (P5).
+    nodes = common.read_jsonl(data_dir / "runs" / "graph_nodes_v1.jsonl")
+    node_names = [n["name"] for n in nodes]
+    node_vecs = np.asarray(embedder.embed_batch(node_names), dtype=np.float64)
+    node_vectors_sha256 = graph_expand.save_node_vectors(
+        node_vecs, node_names, data_dir / "runs" / "graph_node_vectors_v1.npy")
 
     original_queries = common.load_queries()
     original_cosine = common.load_run(corpus_version, "vector_cosine_v1")
-    build_from_frozen(data_dir, expected, queries=original_queries, cosine=original_cosine, suffix="")
+    build_from_frozen(data_dir, expected, queries=original_queries, cosine=original_cosine,
+                      suffix="", node_vecs=node_vecs, node_vectors_sha256=node_vectors_sha256)
 
     graphq_queries = common.load_queries(common.REPO_ROOT / "queries_graph.csv")
     graphq_cosine = common.read_jsonl(data_dir / "runs" / "vector_cosine_graphq_v1.jsonl")
-    build_from_frozen(data_dir, expected, queries=graphq_queries, cosine=graphq_cosine, suffix=".graphq")
+    build_from_frozen(data_dir, expected, queries=graphq_queries, cosine=graphq_cosine,
+                      suffix=".graphq", node_vecs=node_vecs, node_vectors_sha256=node_vectors_sha256)
 
     return 0
 
