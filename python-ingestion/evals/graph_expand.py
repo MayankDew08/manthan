@@ -114,7 +114,9 @@ def expand_from_results(
             raise ValueError(f"duplicate seed id: {cid}")
         seen_seeds.add(cid)
 
-    used_seeds = seeds[:k]
+    # The k best RANKS, not the first k list positions (review #4 K2): a
+    # caller-shuffled seed list must not change which seeds are used.
+    used_seeds = sorted(seeds, key=lambda s: s["rank"])[:k]
 
     contributions: dict[str, list[tuple[float, str, str | None, str]]] = {}
     dead_ends = 0
@@ -221,8 +223,9 @@ def expand_from_query(
     contributions: dict[str, list[tuple[float, str, str | None, None]]] = {}
     for cos_sim, node_type, name, node in start_nodes:
         degree = node["degree"]
-        if degree == 1:
-            continue  # a degree-1 start node reaches nothing new (defensive; see R7)
+        # R7's dead-end rule is for B-r (the seed is the doc itself). Here a
+        # degree-1 start node means the query matched a connector only one doc
+        # carries: a direct hit, not a dead end (review #4 K1).
         w_path = 1.0 / math.log(1 + degree)
         contrib = cos_sim * w_path
         path = "query_entity" if node_type == "entity" else "query_topic"
@@ -289,7 +292,7 @@ def note_for(
             if edge["neighbor"] != doc_id:
                 continue
             w_path = _path_weight(edge["path"], edge["degree"], hub_rule)
-            if w_path is None or w_path == 0.0:
+            if w_path is None:  # hub: no note. (w_path == 0.0 can't happen; review #4 K1.)
                 continue
             contribs.append((w_seed * w_path, edge["path"], edge["connector"], seed_id))
 
@@ -324,7 +327,7 @@ def note_for_query(
         if node is None or doc_id not in node.get("corpus_doc_ids", ()):
             continue
         w_path = _path_weight(node_type, node["degree"], hub_rule)
-        if w_path is None or w_path == 0.0:
+        if w_path is None:  # hub: no note. (w_path == 0.0 can't happen; review #4 K1.)
             continue
         contribs.append((start.get("score", 0.0) * w_path, path, connector, None))
 
