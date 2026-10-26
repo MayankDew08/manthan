@@ -9,11 +9,24 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 from typing import Any
 
 from evals import common, ladder_stats, topup
 
 STARTS = (("r", "graph_b2r_ctx_rr"), ("q", "graph_b2q_ctx_rr"))
+
+# Predictions-file short names -> run ids (spec section 11).
+SHORT_NAMES = {
+    "ladder_s2_cos_bm25_rr": "S2",
+    "ctrl_c0_deeper_rr": "C0",
+    "ctrl_c1_denorm_rr": "C1",
+    "ctrl_c2_payload_rr": "C2",
+    "graph_b1r_rr": "B1-r",
+    "graph_b2r_ctx_rr": "B2-r",
+    "graph_b1q_rr": "B1-q",
+    "graph_b2q_ctx_rr": "B2-q",
+}
 
 SYSTEMS = (
     "ladder_s2_cos_bm25_rr",
@@ -245,6 +258,11 @@ def decide_for_set(set_name: str, set_result: dict[str, Any]) -> dict[str, dict[
                      and _original_delta_beats(c2["verdict"], c2["mean_delta"]))
         else:
             n = len(per_system["ctrl_c0_deeper_rr"])
+            if n <= 4:
+                # D16: "too few to decide" is its own outcome -- never coerce
+                # graph_beats' None into a False branch decision (review #5 P2).
+                out[start] = {"branch": "TOO FEW TO DECIDE", "n": n}
+                continue
             s2_w, s2_l = _graph_win_loss(per_system, "ladder_s2_cos_bm25_rr", "ctrl_c0_deeper_rr")
             step1 = bool(graph_beats(n, s2_w, s2_l))
             c0_w, c0_l = _graph_win_loss(per_system, "ctrl_c0_deeper_rr", b2)
@@ -260,7 +278,10 @@ def decide_for_set(set_name: str, set_result: dict[str, Any]) -> dict[str, dict[
 def attach_predictions(
     comparisons: list[dict[str, Any]], predictions: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Each comparison gets ``prediction`` and ``prediction_held`` from the locked file."""
+    """Each comparison gets ``prediction`` and ``prediction_held`` from a flat
+    ``{"base->new": {"expected_verdict": ...}}`` map. For the real predictions
+    file's shape (nested, owner/planner, short names), use
+    ``attach_set_predictions`` instead."""
     out = []
     for c in comparisons:
         pred = predictions.get(f"{c['base']}->{c['new']}")
@@ -269,6 +290,53 @@ def attach_predictions(
         else:
             expected = pred["expected_verdict"]
             out.append({**c, "prediction": expected, "prediction_held": expected == c["verdict"]})
+    return out
+
+
+def load_predictions(path: Path) -> dict[str, Any]:
+    """The locked predictions file; raises if it's missing (review #5 P1c)."""
+    path = Path(path)
+    if not path.exists():
+        raise ValueError(f"predictions file not found: {path}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _find_prediction_entry(predictions_for_set: Any, short_key: str) -> dict[str, Any] | None:
+    """Look up ``short_key`` in one role's set block; "abstain" strings and
+    combined keys (``"B1-q->B2-q and B1-r->B2-r"``) are handled."""
+    if not isinstance(predictions_for_set, dict):
+        return None  # e.g. "abstain (D18)"
+    if short_key in predictions_for_set:
+        return predictions_for_set[short_key]
+    for key, entry in predictions_for_set.items():
+        if key == "expected_branch" or not isinstance(entry, dict):
+            continue
+        if short_key in (part.strip() for part in key.split(" and ")):
+            return entry
+    return None
+
+
+def attach_set_predictions(
+    comparisons: list[dict[str, Any]], predictions: dict[str, Any], set_name: str,
+) -> list[dict[str, Any]]:
+    """Each comparison gets owner_prediction/owner_prediction_held and the
+    same for planner, from the real predictions file (owner/planner nested
+    under original_set/graph_set, short run names; review #5 P1b)."""
+    set_key = f"{set_name}_set"
+    out = []
+    for c in comparisons:
+        short_key = f"{SHORT_NAMES.get(c['base'], c['base'])}->{SHORT_NAMES.get(c['new'], c['new'])}"
+        enriched = dict(c)
+        for role in ("owner", "planner"):
+            entry = _find_prediction_entry(predictions.get(role, {}).get(set_key), short_key)
+            if entry is None:
+                enriched[f"{role}_prediction"] = None
+                enriched[f"{role}_prediction_held"] = None
+            else:
+                expected = entry["expected_verdict"]
+                enriched[f"{role}_prediction"] = expected
+                enriched[f"{role}_prediction_held"] = expected == c["verdict"]
+        out.append(enriched)
     return out
 
 
@@ -286,6 +354,25 @@ def _avg_over_queries(fn, rows: list[dict[str, Any]], qrels: dict[str, Any],
     by_query = _rows_by_query(rows)
     vals = [fn(by_query.get(qid, []), qrels) for qid in query_ids]
     return sum(vals) / len(vals) if vals else 0.0
+
+
+def system_metrics(
+    rows: list[dict[str, Any]],
+    qrels: dict[str, Any],
+    per_system_entry: dict[str, Any],
+    all_query_ids: list[str],
+) -> dict[str, float]:
+    """nDCG@5, recall_pool, judged@5, averaged over ladder_stats.answerable
+    query ids only -- not every query id handed in (review #5 P3)."""
+    answerable_ids = ladder_stats.answerable(qrels, all_query_ids)
+    if not answerable_ids:
+        return {"ndcg_at_5": 0.0, "recall_pool": 0.0, "judged_at_5": 0.0}
+    ndcg_vals = [per_system_entry[qid]["ndcg"] for qid in answerable_ids if qid in per_system_entry]
+    return {
+        "ndcg_at_5": sum(ndcg_vals) / len(answerable_ids),
+        "recall_pool": _avg_over_queries(recall_pool, rows, qrels, answerable_ids),
+        "judged_at_5": _avg_over_queries(judged_at_5, rows, qrels, answerable_ids),
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -316,30 +403,23 @@ def main(argv: list[str] | None = None) -> int:
 
     scored = score_sets(runs, qrels, queries)
 
-    predictions_path = common.EVALS_DIR / "graph_expand_predictions.json"
-    predictions = (json.loads(predictions_path.read_text(encoding="utf-8"))
-                   if predictions_path.exists() else {})
+    # A missing predictions file raises (P1c), not a silent {}.
+    predictions = load_predictions(common.EVALS_DIR / "graph_expand_predictions.json")
 
     result: dict[str, Any] = {"sets": {}}
     for set_name, set_result in scored.items():
         qids = queries[set_name]
         decisions = decide_for_set(set_name, set_result)
         result["sets"][set_name] = {
-            "comparisons": attach_predictions(set_result["comparisons"], predictions),
+            "comparisons": attach_set_predictions(set_result["comparisons"], predictions, set_name),
             "decisions": decisions,
             "path_split": {
                 start: path_split(runs[set_name].get(b2, []), qrels[set_name])
                 for start, b2 in STARTS
             },
             "metrics": {
-                rid: {
-                    "ndcg_at_5": sum(v["ndcg"] for v in set_result["per_system"][rid].values())
-                                / len(qids) if qids else 0.0,
-                    "recall_pool": _avg_over_queries(recall_pool, runs[set_name].get(rid, []),
-                                                     qrels[set_name], qids),
-                    "judged_at_5": _avg_over_queries(judged_at_5, runs[set_name].get(rid, []),
-                                                     qrels[set_name], qids),
-                }
+                rid: system_metrics(runs[set_name].get(rid, []), qrels[set_name],
+                                    set_result["per_system"][rid], qids)
                 for rid in SYSTEMS
             },
         }
