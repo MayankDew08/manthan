@@ -23,6 +23,7 @@ evals/*
 !evals/pool_keywords.json
 !evals/predictions.json
 !evals/ladder_predictions.json
+!evals/graph_expand_predictions.json
 
 # Metrics / Reports
 metrics/*.md

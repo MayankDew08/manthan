@@ -1,0 +1,32 @@
+{
+  "_notes": "Pre-registered 2026-10-23 before any Run B system existed. Facts known at registration: headroom 19/104; 12 of 19 misses within rrf top 60; graph shape (section 2.3). Owner answered first; planner registered afterwards without revising. Planner abstains on the graph set (drafted its questions, D18). Predictions, not results.",
+  "registered_at": "2026-10-23",
+  "owner": {
+    "original_set": {
+      "S2->C0": {"expected_verdict": "improved", "reason": "12 of 19 missed relevant docs sit in the deeper RRF list; the re-ranker will promote some of them."},
+      "expected_branch": "GRAPH OUT"
+    },
+    "graph_set": {
+      "B1-q->B2-q and B1-r->B2-r": {"expected_verdict": "improved", "reason": "Notes let the re-ranker read why a doc connects."},
+      "expected_branch": "GRAPH OUT"
+    }
+  },
+  "planner": {
+    "original_set": {
+      "S2->C0": {"expected_verdict": "no detectable difference", "reason": "Misses cluster in q001/q005, which already have 13 and 24 relevant docs; their top 5 is likely already relevant, so extra relevant candidates barely move nDCG@5."},
+      "S2->C1": {"expected_verdict": "no detectable difference", "reason": "Few thin-message needs in the original set."},
+      "S2->C2": {"expected_verdict": "no detectable difference", "reason": "Few connection-shaped needs; same re-ranker blind spot."},
+      "C0->B2-r": {"expected_verdict": "no detectable difference", "reason": "A deeper pool covers most of what result-start expansion adds."},
+      "C1->B2-r": {"expected_verdict": "no detectable difference", "reason": "Both near S2."},
+      "C2->B2-r": {"expected_verdict": "no detectable difference", "reason": "Both near S2."},
+      "C0->B2-q": {"expected_verdict": "no detectable difference", "reason": "Query-start nodes on concept queries are broad; the re-ranker filters the noise, but nothing new reaches the top 5."},
+      "C1->B2-q": {"expected_verdict": "no detectable difference", "reason": "Both near S2."},
+      "C2->B2-q": {"expected_verdict": "no detectable difference", "reason": "Both near S2."},
+      "B1-r->B2-r": {"expected_verdict": "no detectable difference", "reason": "Few connected docs reach the top 5 on this set."},
+      "B1-q->B2-q": {"expected_verdict": "no detectable difference", "reason": "Same."},
+      "expected_branch": "GRAPH OUT (fails step 2); step 1 not improved"
+    },
+    "graph_set": "abstain (D18)"
+  },
+  "disagreement_to_watch": "S2->C0 on the original set: owner reads 'relevant docs get found'; planner reads 'nDCG@5 only sees the top 5, which may already be full'."
+}

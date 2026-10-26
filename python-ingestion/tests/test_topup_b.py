@@ -272,6 +272,46 @@ class TestTopupBUnit:
             assert rows, name
             assert list(rows[0].keys()) == common.ANNOTATION_COLUMNS, name
 
+    def test_U6_F4_missing_run_file_raises_and_writes_no_sheet(self, tmp_path):
+        """Review #5 P4: a missing run file must not silently become an
+        empty run -- the pool would be partial and the gap would never show."""
+        tb = _topup_b()
+        data = tmp_path
+        (data / "runs").mkdir()
+
+        documents = [
+            {"candidate_id": "msg1", "candidate_type": "message", "embedded_text": "message one"},
+            {"candidate_id": "link:a", "candidate_type": "link", "embedded_text": "alpha body",
+             "title": "Alpha", "url": "http://example.test/a"},
+        ]
+        with open(data / "documents.jsonl", "w", encoding="utf-8") as f:
+            for d in documents:
+                f.write(json.dumps(d) + "\n")
+
+        (data / "queries.csv").write_text("query_id,query_text\nq1,alpha\n", encoding="utf-8")
+        (data / "queries_graph.csv").write_text("query_id,query_text\ng1,alpha\n", encoding="utf-8")
+
+        for rid in tb.GRAPH_SYSTEMS:
+            if rid == "graph_b1r_rr":
+                continue  # missing on purpose
+            with open(data / "runs" / f"{rid}.jsonl", "w", encoding="utf-8") as f:
+                f.write(json.dumps(_row("q1", "msg1", 1, rid)) + "\n")
+            with open(data / "runs" / f"{rid}.graphq.jsonl", "w", encoding="utf-8") as f:
+                f.write(json.dumps(_row("g1", "msg1", 1, rid)) + "\n")
+        with open(data / "runs" / "vector_cosine_graphq_v1.jsonl", "w", encoding="utf-8") as f:
+            f.write(json.dumps(_row("g1", "link:a", 1, "vector_cosine_graphq_v1")) + "\n")
+        (data / "runs" / "graph_neighbors_v1.jsonl").write_text("", encoding="utf-8")
+        (data / "qrels_v2.csv").write_text(
+            "query_id,candidate_id,relevance,answer_bearing,reason\n", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="graph_b1r_rr"):
+            tb.main(["build", "--data-dir", str(data),
+                    "--queries", str(data / "queries.csv"),
+                    "--queries-graph", str(data / "queries_graph.csv")])
+
+        assert not (data / "annotation_topup_b.csv").exists()
+        assert not (data / "annotation_graphq.csv").exists()
+
     @pytest.mark.parametrize("which", ["original", "graph"])
     def test_U6_F1_blank_grade_in_either_sheet_names_the_row(self, which):
         tb = _topup_b()

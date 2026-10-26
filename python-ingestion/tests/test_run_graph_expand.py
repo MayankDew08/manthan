@@ -421,6 +421,88 @@ class TestRunGraphExpandUnit:
         assert calls == ["parity"]
         assert reranker.calls == [], "no system should be ranked before the parity check"
 
+    def test_U5_F5_stale_node_vectors_on_disk_are_never_used(self, tmp_path, monkeypatch):
+        """Review #5 P5: a stale graph_node_vectors_v1.npy on disk (wrong row
+        count) must not be reused -- the node names are embedded fresh."""
+        rge = _run_graph_expand()
+        data = tmp_path / "data"
+        (data / "runs").mkdir(parents=True)
+
+        with open(data / "documents.jsonl", "w", encoding="utf-8") as f:
+            f.write(json.dumps({"candidate_id": "m1", "candidate_type": "message",
+                                "embedded_text": "m1"}) + "\n")
+        (data / "runs" / "graph_neighbors_v1.jsonl").write_text("", encoding="utf-8")
+
+        nodes = [
+            {"node_type": "entity", "name": "alpha", "degree": 2, "corpus_doc_ids": ["m1"]},
+            {"node_type": "topic", "name": "beta", "degree": 2, "corpus_doc_ids": ["m1"]},
+        ]
+        with open(data / "runs" / "graph_nodes_v1.jsonl", "w", encoding="utf-8") as f:
+            for n in nodes:
+                f.write(json.dumps(n) + "\n")
+        (data / "runs" / "payload_entities_v1.json").write_text(
+            json.dumps({"m1": {"entities": [], "topics": []}}), encoding="utf-8")
+        (data / "runs" / "document_vectors_v1.ids.json").write_text(
+            json.dumps(["m1"]), encoding="utf-8")
+        np.save(data / "runs" / "document_vectors_v1.npy", np.array([[1.0, 0.0]]))
+
+        # Stale: one row, but there are two nodes to embed.
+        np.save(data / "runs" / "graph_node_vectors_v1.npy", np.array([[9.0, 9.0]]))
+
+        names = ["documents.jsonl", "runs/graph_neighbors_v1.jsonl",
+                 "runs/graph_nodes_v1.jsonl", "runs/payload_entities_v1.json"]
+        expected = {name: hashlib.sha256((data / name).read_bytes()).hexdigest()
+                    for name in names}
+
+        embedded_calls = []
+
+        def fake_embed_batch(texts):
+            embedded_calls.append(list(texts))
+            return [[1.0, 0.0] for _ in texts]
+
+        monkeypatch.setattr(rge.embedder, "embed_text", lambda text: [1.0, 0.0])
+        monkeypatch.setattr(rge.embedder, "embed_batch", fake_embed_batch)
+        monkeypatch.setattr(rge.denorm_control, "_get_tokenizer", lambda: WordTokenizer())
+
+        rge.build_from_frozen(
+            data, expected,
+            queries=[{"query_id": "q1", "query_text": "alpha"}],
+            cosine=[{"run_id": "vector_cosine_v1", "query_id": "q1",
+                    "candidate_id": "m1", "rank": 1, "score": 1.0}],
+        )
+
+        assert any(set(call) == {"alpha", "beta"} for call in embedded_calls), (
+            "the two real node names must be freshly embedded, ignoring the stale file")
+
+    def test_U5_F6_missing_stored_vectors_file_raises(self, tmp_path, monkeypatch):
+        """Review #5 P6: a missing document_vectors_v1.* must raise, not
+        silently skip the C1 parity check."""
+        rge = _run_graph_expand()
+        data = tmp_path / "data"
+        (data / "runs").mkdir(parents=True)
+
+        with open(data / "documents.jsonl", "w", encoding="utf-8") as f:
+            f.write(json.dumps({"candidate_id": "m1", "candidate_type": "message",
+                                "embedded_text": "m1"}) + "\n")
+        (data / "runs" / "graph_neighbors_v1.jsonl").write_text("", encoding="utf-8")
+        (data / "runs" / "graph_nodes_v1.jsonl").write_text("", encoding="utf-8")
+        (data / "runs" / "payload_entities_v1.json").write_text(
+            json.dumps({"m1": {"entities": [], "topics": []}}), encoding="utf-8")
+        # document_vectors_v1.npy / .ids.json intentionally absent.
+
+        names = ["documents.jsonl", "runs/graph_neighbors_v1.jsonl",
+                 "runs/graph_nodes_v1.jsonl", "runs/payload_entities_v1.json"]
+        expected = {name: hashlib.sha256((data / name).read_bytes()).hexdigest()
+                    for name in names}
+
+        monkeypatch.setattr(rge.embedder, "embed_text", lambda text: [1.0, 0.0])
+        monkeypatch.setattr(rge.embedder, "embed_batch",
+                            lambda texts: [[1.0, 0.0] for _ in texts])
+        monkeypatch.setattr(rge.denorm_control, "_get_tokenizer", lambda: WordTokenizer())
+
+        with pytest.raises(ValueError, match="document_vectors_v1"):
+            rge.build_from_frozen(data, expected, queries=[], cosine=[])
+
     def test_U5_F2_reranker_pin_is_enforced(self, monkeypatch):
         rge = _run_graph_expand()
 

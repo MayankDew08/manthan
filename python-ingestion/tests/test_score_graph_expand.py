@@ -5,6 +5,7 @@ pre-registered (D16). Decision functions take no latency input (D17).
 """
 
 import inspect
+import json
 import sys
 from pathlib import Path
 
@@ -329,6 +330,85 @@ class TestScoreGraphExpandUnit:
         assert out2["r"]["branch"] == "GRAPH STAYS"
         assert out2["q"]["step2_graph_over_c0"] is False
         assert out2["q"]["branch"] == "GRAPH OUT"
+
+    def test_U8_A3_attach_set_predictions_with_the_real_file_shape(self):
+        """Review #5 P1: the real predictions file nests owner/planner under
+        original_set/graph_set with short names (S2, C0, ...); attach_set_
+        predictions must map run ids to those short names and report both
+        roles. A missing file raises."""
+        sge = _score_graph_expand()
+        predictions_path = Path(sge.__file__).parent / "graph_expand_predictions.json"
+        predictions = json.loads(predictions_path.read_text(encoding="utf-8"))
+
+        comparisons = [
+            {"base": "ladder_s2_cos_bm25_rr", "new": "ctrl_c0_deeper_rr", "verdict": "improved"},
+        ]
+        out = sge.attach_set_predictions(comparisons, predictions, "original")
+
+        assert out[0]["owner_prediction"] == "improved"
+        assert out[0]["planner_prediction"] == "no detectable difference"
+
+        with pytest.raises(ValueError, match="predictions"):
+            sge.load_predictions(Path("/does/not/exist/graph_expand_predictions.json"))
+
+    def test_U8_B12_graph_set_n_le_4_is_too_few_to_decide(self):
+        """Review #5 P2: n <= 4 must never reach decide_branch as a coerced
+        False -- it's its own outcome, for both starts."""
+        sge = _score_graph_expand()
+
+        def per_query(values):
+            return {qid: {"ndcg": v, "success": 0, "mrr": 0, "candidate_success": 0}
+                    for qid, v in values.items()}
+
+        qids = [f"g{i:03d}" for i in range(1, 5)]  # only 4 answerable queries
+        base = per_query({q: 0.5 for q in qids})
+        better = per_query({q: 0.6 for q in qids})
+
+        def cmp(b, n, verdict, delta):
+            return {"base": b, "new": n, "verdict": verdict, "mean_delta": delta,
+                    "ci_low": 0.0, "ci_high": 0.0, "n": 4}
+
+        graph_result = {
+            "per_system": {
+                "ladder_s2_cos_bm25_rr": base,
+                "ctrl_c0_deeper_rr": base,
+                "ctrl_c1_denorm_rr": base,
+                "ctrl_c2_payload_rr": base,
+                "graph_b2r_ctx_rr": better,
+                "graph_b2q_ctx_rr": better,
+            },
+            "comparisons": [cmp("ladder_s2_cos_bm25_rr", "ctrl_c0_deeper_rr", "improved", 0.0)],
+        }
+
+        out = sge.decide_for_set("graph", graph_result)
+        assert out["r"]["branch"] == "TOO FEW TO DECIDE"
+        assert out["q"]["branch"] == "TOO FEW TO DECIDE"
+
+    def test_U8_B13_metrics_average_over_answerable_queries_only(self):
+        """Review #5 P3: the reported average must use ladder_stats.answerable,
+        not every query id handed in."""
+        sge = _score_graph_expand()
+        from evals import ladder_stats
+
+        qrels = {
+            "q1": {"d1": {"relevance": 3, "answer_bearing": 0}},
+            "q2": {"d1": {"relevance": 0, "answer_bearing": 0}},  # not answerable
+            "q3": {"d1": {"relevance": 2, "answer_bearing": 0}},
+        }
+        all_qids = ["q1", "q2", "q3"]
+        assert ladder_stats.answerable(qrels, all_qids) == ["q1", "q3"]
+
+        per_system_entry = {
+            "q1": {"ndcg": 1.0, "success": 1, "mrr": 1.0, "candidate_success": 1},
+            "q3": {"ndcg": 0.5, "success": 1, "mrr": 1.0, "candidate_success": 1},
+        }
+        rows = [
+            {"run_id": "x", "query_id": "q1", "candidate_id": "d1", "rank": 1, "score": 1.0},
+            {"run_id": "x", "query_id": "q3", "candidate_id": "d1", "rank": 1, "score": 1.0},
+        ]
+
+        out = sge.system_metrics(rows, qrels, per_system_entry, all_qids)
+        assert out["ndcg_at_5"] == pytest.approx((1.0 + 0.5) / 2)
 
 
 class TestScoreGraphExpandAntiCheat:
