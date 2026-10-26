@@ -7,11 +7,12 @@ CONTAINS adjacency (D21), never a ``doc["links"]`` field.
 
 from __future__ import annotations
 
+import argparse
 import random
 from pathlib import Path
 from typing import Any
 
-from evals import denorm_control, pooling, topup
+from evals import common, denorm_control, pooling, topup
 
 TOPUP_ESCALATE_ORIGINAL = 300
 TOPUP_ESCALATE_GRAPH = 800
@@ -168,3 +169,90 @@ def read_csv(path: Path) -> list[dict[str, Any]]:
 
 def write_csv(path: Path, rows: list[dict[str, Any]], columns: list[str]) -> None:
     topup.write_csv(path, rows, columns)
+
+
+# ---- CLI (review #4 K5) -----------------------------------------------------
+
+def _adjacency_from_frozen(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        out.setdefault(row["candidate_id"], []).append({
+            "neighbor": row["neighbor_id"], "path": row["path"],
+            "connector": row["connector"], "degree": row["connector_degree"],
+            "in_corpus": row["in_corpus"]})
+    return out
+
+
+def _read_jsonl_if_exists(path: Path) -> list[dict[str, Any]]:
+    return common.read_jsonl(path) if path.exists() else []
+
+
+def cmd_build(data_dir: Path, queries_path: Path, graphq_queries_path: Path) -> int:
+    """Both sheets (with check_sheet_size), printing only the two row counts."""
+    documents = common.read_jsonl(data_dir / "documents.jsonl")
+    docs_by_id = {d["candidate_id"]: d for d in documents}
+    queries_by_id = {
+        q["query_id"]: q
+        for q in common.load_queries(queries_path) + common.load_queries(graphq_queries_path)
+    }
+
+    runs_dir = data_dir / "runs"
+    original_runs = {rid: _read_jsonl_if_exists(runs_dir / f"{rid}.jsonl") for rid in GRAPH_SYSTEMS}
+    qrels_v2_path = data_dir / "qrels_v2.csv"
+    qrels_v2 = (common.load_qrels(qrels_v2_path, valid_ids=set(docs_by_id))
+                if qrels_v2_path.exists() else {})
+
+    pairs_original = original_pairs(original_runs, qrels_v2)
+    check_sheet_size("original", len(pairs_original))
+    original_sheet = build_sheet(pairs_original, queries_by_id, docs_by_id, kind="original")
+    write_csv(data_dir / "annotation_topup_b.csv", original_sheet, common.ANNOTATION_COLUMNS)
+
+    graphq_runs = {rid: _read_jsonl_if_exists(runs_dir / f"{rid}.graphq.jsonl")
+                   for rid in GRAPH_SYSTEMS}
+    graphq_cosine = _read_jsonl_if_exists(runs_dir / "vector_cosine_graphq_v1.jsonl")
+    neighbors = _adjacency_from_frozen(_read_jsonl_if_exists(runs_dir / "graph_neighbors_v1.jsonl"))
+
+    pairs_graph = graph_pairs(graphq_runs, graphq_cosine)
+    check_sheet_size("graph", len(pairs_graph))
+    graph_sheet = build_sheet(pairs_graph, queries_by_id, docs_by_id, kind="graph",
+                              neighbors=neighbors)
+    write_csv(data_dir / "annotation_graphq.csv", graph_sheet, common.ANNOTATION_COLUMNS)
+
+    # Counts only -- never a candidate_id or any doc content (the owner grades blind).
+    print(f"original_sheet_rows={len(original_sheet)}")
+    print(f"graph_sheet_rows={len(graph_sheet)}")
+    return 0
+
+
+def cmd_merge(data_dir: Path) -> int:
+    """qrels_v2 + both graded sheets -> qrels_v3.csv."""
+    v2_rows = topup.read_csv(data_dir / "qrels_v2.csv")
+    original_graded = topup.read_csv(data_dir / "annotation_topup_b.csv")
+    graph_graded = topup.read_csv(data_dir / "annotation_graphq.csv")
+
+    v3_rows = merge_qrels_v3(v2_rows, original_graded, graph_graded)
+    write_csv(data_dir / "qrels_v3.csv", v3_rows, topup.QRELS_COLUMNS)
+
+    print(f"qrels_v3_rows={len(v3_rows)}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="U6 topup_b")
+    parser.add_argument("command", choices=["build", "merge"])
+    parser.add_argument("--corpus-version", default=common.DEFAULT_CORPUS_VERSION)
+    parser.add_argument("--data-dir", default=None)
+    parser.add_argument("--queries", type=Path, default=common.DEFAULT_QUERIES)
+    parser.add_argument("--queries-graph", type=Path, default=common.REPO_ROOT / "queries_graph.csv")
+    args = parser.parse_args(argv)
+
+    data_dir = Path(args.data_dir) if args.data_dir else common.data_dir(
+        args.corpus_version, create=False)
+
+    if args.command == "build":
+        return cmd_build(data_dir, args.queries, args.queries_graph)
+    return cmd_merge(data_dir)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
