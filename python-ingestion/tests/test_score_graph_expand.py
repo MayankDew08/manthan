@@ -269,6 +269,67 @@ class TestScoreGraphExpandUnit:
             (None, None),
         ]
 
+    def test_U8_B11_decide_for_set_both_sets_both_starts(self):
+        """Review #4 K6: decide_for_set wires step 1/2/3 per start (r, q).
+        Original set: beats_original-style (bootstrap verdict + mean delta).
+        Graph set: graph_beats (D16 scoreboard) via ladder_stats.win_tie_loss
+        over the raw per-query ndcg in per_system."""
+        sge = _score_graph_expand()
+
+        def cmp(base, new, verdict, mean_delta):
+            return {"base": base, "new": new, "verdict": verdict, "mean_delta": mean_delta,
+                    "ci_low": 0.0, "ci_high": 0.0, "n": 8}
+
+        original_result = {
+            "per_system": {},
+            "comparisons": [
+                cmp("ladder_s2_cos_bm25_rr", "ctrl_c0_deeper_rr", "improved", 0.03),
+                cmp("ctrl_c0_deeper_rr", "graph_b2r_ctx_rr", "improved", 0.03),
+                cmp("ctrl_c1_denorm_rr", "graph_b2r_ctx_rr", "no detectable difference", 0.00),
+                cmp("ctrl_c2_payload_rr", "graph_b2r_ctx_rr", "improved", 0.03),
+                cmp("ctrl_c0_deeper_rr", "graph_b2q_ctx_rr", "improved", 0.03),
+                cmp("ctrl_c1_denorm_rr", "graph_b2q_ctx_rr", "improved", 0.03),
+                cmp("ctrl_c2_payload_rr", "graph_b2q_ctx_rr", "improved", 0.03),
+            ],
+        }
+
+        out = sge.decide_for_set("original", original_result)
+        assert out["r"]["step1_deeper_pool"] is True
+        assert out["r"]["branch"] == "SHIP THE SHORTCUT(S)"   # C1 doesn't beat B2-r
+        assert out["q"]["step1_deeper_pool"] is True
+        assert out["q"]["branch"] == "GRAPH STAYS"            # C1 and C2 both beat B2-q
+
+        def per_query(values):
+            return {qid: {"ndcg": v, "success": 0, "mrr": 0, "candidate_success": 0}
+                    for qid, v in values.items()}
+
+        qids = [f"g{i:03d}" for i in range(1, 9)]
+        base_low = per_query({q: 0.5 for q in qids})
+
+        def winning(n_wins):
+            return per_query({q: (0.52 if i < n_wins else 0.5) for i, q in enumerate(qids)})
+
+        graph_result = {
+            "per_system": {
+                "ladder_s2_cos_bm25_rr": base_low,
+                "ctrl_c0_deeper_rr": base_low,
+                "ctrl_c1_denorm_rr": base_low,
+                "ctrl_c2_payload_rr": base_low,
+                "graph_b2r_ctx_rr": winning(7),   # 7 wins, 0 losses -> graph_beats(8,7,0) True
+                "graph_b2q_ctx_rr": winning(6),   # 6 wins -> graph_beats(8,6,0) False
+            },
+            "comparisons": [
+                cmp("ladder_s2_cos_bm25_rr", "ctrl_c0_deeper_rr", "improved", 0.0),
+            ],
+        }
+
+        out2 = sge.decide_for_set("graph", graph_result)
+        assert out2["r"]["step2_graph_over_c0"] is True
+        assert out2["r"]["step3_graph_over_shortcuts"] is True
+        assert out2["r"]["branch"] == "GRAPH STAYS"
+        assert out2["q"]["step2_graph_over_c0"] is False
+        assert out2["q"]["branch"] == "GRAPH OUT"
+
 
 class TestScoreGraphExpandAntiCheat:
     def test_U8_A1_decision_functions_take_no_latency_input(self):

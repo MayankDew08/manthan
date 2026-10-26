@@ -223,6 +223,22 @@ class TestGraphExpandBehaviour:
         assert got["D"]["via"] == {"path": "query_entity", "connector": "rust", "seed": None}
         assert got["E"]["via"] == {"path": "query_topic", "connector": "agents", "seed": None}
 
+    def test_U3_B12_degree_1_start_node_is_a_direct_hit_not_a_dead_end(self):
+        """Review #4 K1: R7's dead-end rule is for B-r (the seed IS the doc); a
+        degree-1 B-q start node means the query matched a topic/entity that
+        only one doc carries, which is a hit, not something to skip."""
+        nodes = [{"node_type": "topic", "name": "niche", "degree": 1,
+                  "corpus_doc_ids": ["D"]}]
+        node_vecs = np.array([[1.0, 0.0]], dtype=np.float64)
+        q = np.array([1.0, 0.0], dtype=np.float64)
+
+        rows, stats = _expand_q(q, node_vecs, nodes, set(), {"D"}, k=1)
+
+        assert [r["candidate_id"] for r in rows] == ["D"]
+        assert rows[0]["score"] == pytest.approx(1.0 / math.log(2.0), abs=1e-9)
+        assert rows[0]["via"] == {"path": "query_topic", "connector": "niche", "seed": None}
+        assert stats["bq_nodes_used"] == 1
+
     def test_U3_B9_note_wording_and_labels(self):
         gx = _graph_expand()
         adj = {"S1": [
@@ -339,6 +355,23 @@ class TestGraphExpandBoundaries:
             f"doc{i:02d}" for i in range(1, 12)}
 
         rows, _ = _expand(seeds, adj, set(), corpus)
+
+        got = {r["candidate_id"] for r in rows}
+        assert got == {f"doc{i:02d}" for i in range(1, 11)}
+        assert "doc11" not in got
+
+    def test_U3_E12_eleven_seeds_shuffled_still_uses_the_best_ten_ranks(self):
+        """Review #4 K2: seeds[:k] must take the k best RANKS, not the first k
+        list positions -- a caller-shuffled seed list must not change the set
+        of seeds used."""
+        seeds_by_rank = [_seed(f"S{i:02d}", i) for i in range(1, 12)]
+        shuffled = list(reversed(seeds_by_rank))  # rank 11 first positionally
+        adj = {s["candidate_id"]: [_edge(f"doc{i:02d}", "contains")]
+               for i, s in enumerate(seeds_by_rank, start=1)}
+        corpus = {s["candidate_id"] for s in seeds_by_rank} | {
+            f"doc{i:02d}" for i in range(1, 12)}
+
+        rows, _ = _expand(shuffled, adj, set(), corpus)
 
         got = {r["candidate_id"] for r in rows}
         assert got == {f"doc{i:02d}" for i in range(1, 11)}

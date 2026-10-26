@@ -368,6 +368,59 @@ class TestRunGraphExpandUnit:
         assert not runs.exists() or not any(runs.iterdir()), \
             "a sha mismatch must stop the build before any run file is written"
 
+    def test_U5_F3_sha_mismatch_raises_for_the_graph_set_too(self, tmp_path):
+        """Review #4 K3: one code path for both sets (suffix="" / ".graphq");
+        a sha mismatch must raise, naming the file, for either suffix."""
+        rge = _run_graph_expand()
+        data = tmp_path / "data"
+        data.mkdir()
+        names = ["documents.jsonl", "graph_neighbors_v1.jsonl",
+                 "graph_nodes_v1.jsonl", "payload_entities_v1.json"]
+        for name in names:
+            (data / name).write_bytes(f"frozen {name}\n".encode("utf-8"))
+        expected = {name: hashlib.sha256((data / name).read_bytes()).hexdigest()
+                    for name in names}
+        (data / "graph_nodes_v1.jsonl").write_bytes(b"altered\n")
+
+        for suffix in ("", ".graphq"):
+            with pytest.raises(ValueError, match="graph_nodes_v1.jsonl"):
+                rge.build_from_frozen(data, expected, suffix=suffix)
+
+        runs = data / "runs"
+        assert not runs.exists() or not any(runs.iterdir()), \
+            "a sha mismatch must stop the build before any run file is written"
+
+    def test_U5_F4_parity_check_runs_before_any_system_is_ranked(self, monkeypatch):
+        """Review #4 K4: build_systems must call denorm_control.assert_parity
+        (against the frozen stored vectors) before ranking anything, C1
+        included -- a parity failure must escalate, not be silently skipped."""
+        fx = _fixture()
+        rge = _run_graph_expand()
+        monkeypatch.setattr(rge.embedder, "embed_text", lambda text: [1.0, 0.0])
+        monkeypatch.setattr(rge.embedder, "embed_batch",
+                            lambda texts: [[1.0, 0.0] for _ in texts])
+        monkeypatch.setattr(rge.denorm_control, "_get_tokenizer", lambda: WordTokenizer())
+
+        calls = []
+
+        def boom_parity(*args, **kwargs):
+            calls.append("parity")
+            raise ValueError("C1 parity check failed (test)")
+
+        monkeypatch.setattr(rge.denorm_control, "assert_parity", boom_parity)
+
+        reranker = FakeReranker()
+        stored_vectors = {cid: [1.0, 0.0] for cid in fx["docs"]}
+
+        with pytest.raises(ValueError, match="parity"):
+            rge.build_systems(
+                fx["queries"], fx["docs"], fx["cosine"], fx["bm25"],
+                fx["adjacency"], fx["nodes"], fx["node_vecs"], fx["payload"],
+                reranker, stored_vectors=stored_vectors,
+            )
+        assert calls == ["parity"]
+        assert reranker.calls == [], "no system should be ranked before the parity check"
+
     def test_U5_F2_reranker_pin_is_enforced(self, monkeypatch):
         rge = _run_graph_expand()
 

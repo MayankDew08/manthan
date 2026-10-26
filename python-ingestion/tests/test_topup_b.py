@@ -227,6 +227,51 @@ class TestTopupBUnit:
         assert v2_path.read_bytes() == before
         assert len(v3_keys) > len(v2_keys)
 
+    def test_U6_B8_cli_build_writes_two_csvs_and_prints_only_counts(self, tmp_path, capsys):
+        """Review #4 K5: topup_b needs a CLI entry point so data step d can run."""
+        tb = _topup_b()
+        data = tmp_path
+        (data / "runs").mkdir()
+
+        documents = [
+            {"candidate_id": "msg1", "candidate_type": "message", "embedded_text": "message one"},
+            {"candidate_id": "link:a", "candidate_type": "link", "embedded_text": "alpha body",
+             "title": "Alpha", "url": "http://example.test/a"},
+        ]
+        with open(data / "documents.jsonl", "w", encoding="utf-8") as f:
+            for d in documents:
+                f.write(json.dumps(d) + "\n")
+
+        (data / "queries.csv").write_text("query_id,query_text\nq1,alpha\n", encoding="utf-8")
+        (data / "queries_graph.csv").write_text("query_id,query_text\ng1,alpha\n", encoding="utf-8")
+
+        for rid in tb.GRAPH_SYSTEMS:
+            with open(data / "runs" / f"{rid}.jsonl", "w", encoding="utf-8") as f:
+                f.write(json.dumps(_row("q1", "msg1", 1, rid)) + "\n")
+            with open(data / "runs" / f"{rid}.graphq.jsonl", "w", encoding="utf-8") as f:
+                f.write(json.dumps(_row("g1", "msg1", 1, rid)) + "\n")
+        with open(data / "runs" / "vector_cosine_graphq_v1.jsonl", "w", encoding="utf-8") as f:
+            f.write(json.dumps(_row("g1", "link:a", 1, "vector_cosine_graphq_v1")) + "\n")
+        (data / "runs" / "graph_neighbors_v1.jsonl").write_text("", encoding="utf-8")
+        (data / "qrels_v2.csv").write_text(
+            "query_id,candidate_id,relevance,answer_bearing,reason\n", encoding="utf-8")
+
+        rc = tb.main(["build", "--data-dir", str(data),
+                     "--queries", str(data / "queries.csv"),
+                     "--queries-graph", str(data / "queries_graph.csv")])
+        out = capsys.readouterr().out
+
+        assert rc == 0
+        # No document identity or content leaked to stdout -- counts only.
+        assert "candidate_id" not in out
+        assert "msg1" not in out and "link:a" not in out
+        assert "message one" not in out and "alpha body" not in out
+
+        for name in ("annotation_topup_b.csv", "annotation_graphq.csv"):
+            rows = tb.read_csv(data / name)
+            assert rows, name
+            assert list(rows[0].keys()) == common.ANNOTATION_COLUMNS, name
+
     @pytest.mark.parametrize("which", ["original", "graph"])
     def test_U6_F1_blank_grade_in_either_sheet_names_the_row(self, which):
         tb = _topup_b()
