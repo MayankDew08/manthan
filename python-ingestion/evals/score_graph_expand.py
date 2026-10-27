@@ -153,16 +153,26 @@ def decide_branch(
 
 
 def path_split(rows: list[dict[str, Any]], qrels: dict[str, dict[str, Any]], k: int = 5) -> dict[str, Any]:
-    """Share of top-k grade>=2 graph-sourced hits by via.path (U8-B7)."""
-    ranked = sorted(rows, key=lambda r: r["rank"])[:k]
+    """Share of top-k grade>=2 graph-sourced hits by via.path (U8-B7).
+
+    ``rows`` spans every query a run answered, so the top-k must be taken
+    per query_id and the hits summed across queries -- a single global
+    top-k over the pooled rows would let one query's rows crowd out
+    another's (review follow-up)."""
+    by_query: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_query.setdefault(row["query_id"], []).append(row)
+
     path_counts: dict[str, int] = {}
     hits = 0
-    for row in ranked:
-        grade = qrels.get(row["query_id"], {}).get(row["candidate_id"], {}).get("relevance", 0)
-        via = row.get("via")
-        if grade >= 2 and via:
-            hits += 1
-            path_counts[via["path"]] = path_counts.get(via["path"], 0) + 1
+    for qid, qrows in by_query.items():
+        ranked = sorted(qrows, key=lambda r: r["rank"])[:k]
+        for row in ranked:
+            grade = qrels.get(qid, {}).get(row["candidate_id"], {}).get("relevance", 0)
+            via = row.get("via")
+            if grade >= 2 and via:
+                hits += 1
+                path_counts[via["path"]] = path_counts.get(via["path"], 0) + 1
     if hits == 0:
         return {"hits": 0, "shares": {}}
     return {"hits": hits, "shares": {p: c / hits for p, c in path_counts.items()}}
@@ -190,14 +200,110 @@ def judged_at_5(rows: list[dict[str, Any]], qrels: dict[str, dict[str, Any]], k:
     return sum(1 for r in top_k if r["candidate_id"] in doc_qrels) / k
 
 
+METRIC_ROWS = ("ndcg_at_5", "recall_pool", "judged_at_5", "n")
+
+
+def _fmt_cell(value: Any) -> str:
+    if isinstance(value, float):
+        return f"{value:.4f}"
+    return str(value)
+
+
+def _short(run_id: str) -> str:
+    return SHORT_NAMES.get(run_id, run_id)
+
+
+def _metrics_table(metrics: dict[str, dict[str, Any]]) -> list[str]:
+    header = "| metric | " + " | ".join(_short(rid) for rid in SYSTEMS) + " |"
+    sep = "|---" * (len(SYSTEMS) + 1) + "|"
+    lines = [header, sep]
+    for metric in METRIC_ROWS:
+        cells = [_fmt_cell(metrics.get(rid, {}).get(metric, "")) for rid in SYSTEMS]
+        lines.append(f"| {metric} | " + " | ".join(cells) + " |")
+    return lines
+
+
+def _verdicts_table(comparisons: list[dict[str, Any]]) -> list[str]:
+    header = "| base | new | n | mean_delta | ci_low | ci_high | verdict |"
+    sep = "|---|---|---|---|---|---|---|"
+    lines = [header, sep]
+    for c in comparisons:
+        lines.append(
+            f"| {_short(c['base'])} | {_short(c['new'])} | {c.get('n', '')} | "
+            f"{_fmt_cell(c.get('mean_delta', ''))} | {_fmt_cell(c.get('ci_low', ''))} | "
+            f"{_fmt_cell(c.get('ci_high', ''))} | {c['verdict']} |"
+        )
+    return lines
+
+
+def _predictions_table(comparisons: list[dict[str, Any]]) -> list[str]:
+    header = ("| base | new | owner_prediction | owner_prediction_held | "
+              "planner_prediction | planner_prediction_held |")
+    sep = "|---|---|---|---|---|---|"
+    lines = [header, sep]
+    for c in comparisons:
+        lines.append(
+            f"| {_short(c['base'])} | {_short(c['new'])} | "
+            f"{c.get('owner_prediction')} | {c.get('owner_prediction_held')} | "
+            f"{c.get('planner_prediction')} | {c.get('planner_prediction_held')} |"
+        )
+    return lines
+
+
+def _decisions_table(decisions: dict[str, dict[str, Any]]) -> list[str]:
+    header = "| start | branch | step1_deeper_pool | step2_graph_over_c0 | step3_graph_over_shortcuts |"
+    sep = "|---|---|---|---|---|"
+    lines = [header, sep]
+    for start, d in decisions.items():
+        lines.append(
+            f"| {start} | {d.get('branch')} | {d.get('step1_deeper_pool')} | "
+            f"{d.get('step2_graph_over_c0')} | {d.get('step3_graph_over_shortcuts')} |"
+        )
+    return lines
+
+
+def _path_split_table(path_splits: dict[str, dict[str, Any]]) -> list[str]:
+    header = "| start | hits | shares |"
+    sep = "|---|---|---|"
+    lines = [header, sep]
+    for start, p in path_splits.items():
+        shares = ", ".join(f"{path}={share:.2f}" for path, share in p.get("shares", {}).items())
+        lines.append(f"| {start} | {p.get('hits', 0)} | {shares} |")
+    return lines
+
+
 def render_appendix(result: dict[str, Any]) -> bytes:
-    """## Appendix D, the D18 disclosure, the D24 grader-view note, and the result."""
+    """## Appendix D, the D18 disclosure, the D24 grader-view note, then
+    per-set markdown tables (metrics, verdicts, predictions held, decisions,
+    path split) -- not a raw JSON dump of ``result``."""
     lines = [
         APPENDIX_HEADER, "",
         D18_DISCLOSURE, "",
         D24_GRADER_NOTE, "",
-        json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), "",
     ]
+    for set_name, set_result in result.get("sets", {}).items():
+        lines.append(f"### {set_name.capitalize()} set")
+        lines.append("")
+        lines.append("**Metrics**")
+        lines.append("")
+        lines.extend(_metrics_table(set_result.get("metrics", {})))
+        lines.append("")
+        lines.append("**Verdicts**")
+        lines.append("")
+        lines.extend(_verdicts_table(set_result.get("comparisons", [])))
+        lines.append("")
+        lines.append("**Predictions held**")
+        lines.append("")
+        lines.extend(_predictions_table(set_result.get("comparisons", [])))
+        lines.append("")
+        lines.append("**Decisions**")
+        lines.append("")
+        lines.extend(_decisions_table(set_result.get("decisions", {})))
+        lines.append("")
+        lines.append("**Path split**")
+        lines.append("")
+        lines.extend(_path_split_table(set_result.get("path_split", {})))
+        lines.append("")
     return "\n".join(lines).encode("utf-8")
 
 
@@ -275,6 +381,13 @@ def decide_for_set(set_name: str, set_result: dict[str, Any]) -> dict[str, dict[
     return out
 
 
+def _prediction_holds(expected: str, verdict: str) -> bool:
+    """A prediction of "X" holds when the verdict is exactly "X", or carries
+    ladder_stats.verdict's sample-size suffix ("X at n=<k>"). An exact-string
+    match alone missed every prediction against a suffixed verdict."""
+    return verdict == expected or verdict.startswith(f"{expected} at n=")
+
+
 def attach_predictions(
     comparisons: list[dict[str, Any]], predictions: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -289,7 +402,8 @@ def attach_predictions(
             out.append({**c, "prediction": None, "prediction_held": None})
         else:
             expected = pred["expected_verdict"]
-            out.append({**c, "prediction": expected, "prediction_held": expected == c["verdict"]})
+            out.append({**c, "prediction": expected,
+                        "prediction_held": _prediction_holds(expected, c["verdict"])})
     return out
 
 
@@ -335,7 +449,7 @@ def attach_set_predictions(
             else:
                 expected = entry["expected_verdict"]
                 enriched[f"{role}_prediction"] = expected
-                enriched[f"{role}_prediction_held"] = expected == c["verdict"]
+                enriched[f"{role}_prediction_held"] = _prediction_holds(expected, c["verdict"])
         out.append(enriched)
     return out
 
@@ -372,6 +486,7 @@ def system_metrics(
         "ndcg_at_5": sum(ndcg_vals) / len(answerable_ids),
         "recall_pool": _avg_over_queries(recall_pool, rows, qrels, answerable_ids),
         "judged_at_5": _avg_over_queries(judged_at_5, rows, qrels, answerable_ids),
+        "n": len(answerable_ids),
     }
 
 

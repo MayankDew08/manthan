@@ -304,433 +304,116 @@ Disclosure (D18): the planner drafted the 8 questions (2026-10-23) from document
 
 grader view (D24): the original-set top-up sheet shows doc text only, as Run A. The graph-set sheet shows message text plus the titles of its in-corpus shared links, in candidate_id order.
 
-{
-  "sets": {
-    "graph": {
-      "comparisons": [
-        {
-          "base": "ladder_s2_cos_bm25_rr",
-          "ci_high": 0.016210505188746574,
-          "ci_low": 0.0,
-          "mean_delta": 0.005403501729582191,
-          "n": 8,
-          "new": "ctrl_c0_deeper_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": null,
-          "planner_prediction_held": null,
-          "verdict": "no detectable difference at n=8"
-        },
-        {
-          "base": "ladder_s2_cos_bm25_rr",
-          "ci_high": 0.2750275597477409,
-          "ci_low": 0.028849971431620824,
-          "mean_delta": 0.15269355186461558,
-          "n": 8,
-          "new": "ctrl_c1_denorm_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": null,
-          "planner_prediction_held": null,
-          "verdict": "improved"
-        },
-        {
-          "base": "ladder_s2_cos_bm25_rr",
-          "ci_high": 0.0,
-          "ci_low": 0.0,
-          "mean_delta": 0.0,
-          "n": 8,
-          "new": "ctrl_c2_payload_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": null,
-          "planner_prediction_held": null,
-          "verdict": "no detectable difference at n=8"
-        },
-        {
-          "base": "ctrl_c0_deeper_rr",
-          "ci_high": 0.0749121859030277,
-          "ci_low": -0.166580901731833,
-          "mean_delta": -0.060527123408201725,
-          "n": 8,
-          "new": "graph_b2r_ctx_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": null,
-          "planner_prediction_held": null,
-          "verdict": "no detectable difference at n=8"
-        },
-        {
-          "base": "ctrl_c1_denorm_rr",
-          "ci_high": -0.09161987847648576,
-          "ci_low": -0.3314044290196765,
-          "mean_delta": -0.20781717354323512,
-          "n": 8,
-          "new": "graph_b2r_ctx_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": null,
-          "planner_prediction_held": null,
-          "verdict": "regressed"
-        },
-        {
-          "base": "ctrl_c2_payload_rr",
-          "ci_high": 0.08062908862830664,
-          "ci_low": -0.16521416094842944,
-          "mean_delta": -0.05512362167861953,
-          "n": 8,
-          "new": "graph_b2r_ctx_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": null,
-          "planner_prediction_held": null,
-          "verdict": "no detectable difference at n=8"
-        },
-        {
-          "base": "ctrl_c0_deeper_rr",
-          "ci_high": 0.018723226184554284,
-          "ci_low": -0.016210505188746574,
-          "mean_delta": 0.0008375736652692367,
-          "n": 8,
-          "new": "graph_b2q_ctx_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": null,
-          "planner_prediction_held": null,
-          "verdict": "no detectable difference at n=8"
-        },
-        {
-          "base": "ctrl_c1_denorm_rr",
-          "ci_high": -0.0249712965634815,
-          "ci_low": -0.26878648435288943,
-          "mean_delta": -0.14645247646976417,
-          "n": 8,
-          "new": "graph_b2q_ctx_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": null,
-          "planner_prediction_held": null,
-          "verdict": "regressed"
-        },
-        {
-          "base": "ctrl_c2_payload_rr",
-          "ci_high": 0.018723226184554284,
-          "ci_low": 0.0,
-          "mean_delta": 0.006241075394851428,
-          "n": 8,
-          "new": "graph_b2q_ctx_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": null,
-          "planner_prediction_held": null,
-          "verdict": "no detectable difference at n=8"
-        },
-        {
-          "base": "graph_b1r_rr",
-          "ci_high": 0.0749121859030277,
-          "ci_low": -0.166580901731833,
-          "mean_delta": -0.060527123408201725,
-          "n": 8,
-          "new": "graph_b2r_ctx_rr",
-          "owner_prediction": "improved",
-          "owner_prediction_held": false,
-          "planner_prediction": null,
-          "planner_prediction_held": null,
-          "verdict": "no detectable difference at n=8"
-        },
-        {
-          "base": "graph_b1q_rr",
-          "ci_high": 0.018723226184554284,
-          "ci_low": 0.0,
-          "mean_delta": 0.006241075394851428,
-          "n": 8,
-          "new": "graph_b2q_ctx_rr",
-          "owner_prediction": "improved",
-          "owner_prediction_held": false,
-          "planner_prediction": null,
-          "planner_prediction_held": null,
-          "verdict": "no detectable difference at n=8"
-        }
-      ],
-      "decisions": {
-        "q": {
-          "branch": "GRAPH OUT",
-          "step1_deeper_pool": false,
-          "step2_graph_over_c0": false,
-          "step3_graph_over_shortcuts": false
-        },
-        "r": {
-          "branch": "GRAPH OUT",
-          "step1_deeper_pool": false,
-          "step2_graph_over_c0": false,
-          "step3_graph_over_shortcuts": false
-        }
-      },
-      "metrics": {
-        "ctrl_c0_deeper_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.6892438994529767,
-          "recall_pool": 0.8556818181818182
-        },
-        "ctrl_c1_denorm_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.8365339495880101,
-          "recall_pool": 0.9772727272727273
-        },
-        "ctrl_c2_payload_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.6838403977233944,
-          "recall_pool": 0.7401515151515151
-        },
-        "graph_b1q_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.6838403977233944,
-          "recall_pool": 0.7818181818181819
-        },
-        "graph_b1r_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.6892438994529767,
-          "recall_pool": 0.9772727272727273
-        },
-        "graph_b2q_ctx_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.690081473118246,
-          "recall_pool": 0.7818181818181819
-        },
-        "graph_b2r_ctx_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.6287167760447749,
-          "recall_pool": 0.9772727272727273
-        },
-        "ladder_s2_cos_bm25_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.6838403977233944,
-          "recall_pool": 0.7401515151515151
-        }
-      },
-      "path_split": {
-        "q": {
-          "hits": 0,
-          "shares": {}
-        },
-        "r": {
-          "hits": 0,
-          "shares": {}
-        }
-      }
-    },
-    "original": {
-      "comparisons": [
-        {
-          "base": "ladder_s2_cos_bm25_rr",
-          "ci_high": 0.025358738614439876,
-          "ci_low": -0.005654354185717808,
-          "mean_delta": 0.007636417285628141,
-          "n": 22,
-          "new": "ctrl_c0_deeper_rr",
-          "owner_prediction": "improved",
-          "owner_prediction_held": false,
-          "planner_prediction": "no detectable difference",
-          "planner_prediction_held": false,
-          "verdict": "no detectable difference at n=22"
-        },
-        {
-          "base": "ladder_s2_cos_bm25_rr",
-          "ci_high": 0.07700503098647746,
-          "ci_low": -0.0058334899679854495,
-          "mean_delta": 0.03487196675021214,
-          "n": 22,
-          "new": "ctrl_c1_denorm_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": "no detectable difference",
-          "planner_prediction_held": false,
-          "verdict": "no detectable difference at n=22"
-        },
-        {
-          "base": "ladder_s2_cos_bm25_rr",
-          "ci_high": 0.0,
-          "ci_low": 0.0,
-          "mean_delta": 0.0,
-          "n": 22,
-          "new": "ctrl_c2_payload_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": "no detectable difference",
-          "planner_prediction_held": false,
-          "verdict": "no detectable difference at n=22"
-        },
-        {
-          "base": "ctrl_c0_deeper_rr",
-          "ci_high": -0.0033181599992767544,
-          "ci_low": -0.17420303442183704,
-          "mean_delta": -0.08639776803053834,
-          "n": 22,
-          "new": "graph_b2r_ctx_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": "no detectable difference",
-          "planner_prediction_held": false,
-          "verdict": "regressed"
-        },
-        {
-          "base": "ctrl_c1_denorm_rr",
-          "ci_high": -0.022134897145858482,
-          "ci_low": -0.20810177495713605,
-          "mean_delta": -0.11363331749512233,
-          "n": 22,
-          "new": "graph_b2r_ctx_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": "no detectable difference",
-          "planner_prediction_held": false,
-          "verdict": "regressed"
-        },
-        {
-          "base": "ctrl_c2_payload_rr",
-          "ci_high": 0.004693035435385707,
-          "ci_low": -0.16643185699478033,
-          "mean_delta": -0.07876135074491018,
-          "n": 22,
-          "new": "graph_b2r_ctx_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": "no detectable difference",
-          "planner_prediction_held": false,
-          "verdict": "no detectable difference at n=22"
-        },
-        {
-          "base": "ctrl_c0_deeper_rr",
-          "ci_high": 0.003017255426662249,
-          "ci_low": -0.06094659624513776,
-          "mean_delta": -0.02633307697195566,
-          "n": 22,
-          "new": "graph_b2q_ctx_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": "no detectable difference",
-          "planner_prediction_held": false,
-          "verdict": "no detectable difference at n=22"
-        },
-        {
-          "base": "ctrl_c1_denorm_rr",
-          "ci_high": -0.022677161305139023,
-          "ci_low": -0.08922224456193145,
-          "mean_delta": -0.05356862643653966,
-          "n": 22,
-          "new": "graph_b2q_ctx_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": "no detectable difference",
-          "planner_prediction_held": false,
-          "verdict": "regressed"
-        },
-        {
-          "base": "ctrl_c2_payload_rr",
-          "ci_high": 0.010631039939369797,
-          "ci_low": -0.05463288229681051,
-          "mean_delta": -0.018696659686327513,
-          "n": 22,
-          "new": "graph_b2q_ctx_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": "no detectable difference",
-          "planner_prediction_held": false,
-          "verdict": "no detectable difference at n=22"
-        },
-        {
-          "base": "graph_b1r_rr",
-          "ci_high": -0.002857385802283235,
-          "ci_low": -0.17451888954429826,
-          "mean_delta": -0.08625296780974491,
-          "n": 22,
-          "new": "graph_b2r_ctx_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": "no detectable difference",
-          "planner_prediction_held": false,
-          "verdict": "regressed"
-        },
-        {
-          "base": "graph_b1q_rr",
-          "ci_high": 0.010654402714060523,
-          "ci_low": -0.05372100605001185,
-          "mean_delta": -0.018345377523472196,
-          "n": 22,
-          "new": "graph_b2q_ctx_rr",
-          "owner_prediction": null,
-          "owner_prediction_held": null,
-          "planner_prediction": "no detectable difference",
-          "planner_prediction_held": false,
-          "verdict": "no detectable difference at n=22"
-        }
-      ],
-      "decisions": {
-        "q": {
-          "branch": "GRAPH OUT",
-          "step1_deeper_pool": false,
-          "step2_graph_over_c0": false,
-          "step3_graph_over_shortcuts": false
-        },
-        "r": {
-          "branch": "GRAPH OUT",
-          "step1_deeper_pool": false,
-          "step2_graph_over_c0": false,
-          "step3_graph_over_shortcuts": false
-        }
-      },
-      "metrics": {
-        "ctrl_c0_deeper_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.7593152156688621,
-          "recall_pool": 0.9057675657675657
-        },
-        "ctrl_c1_denorm_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.786550765133446,
-          "recall_pool": 0.891163382072473
-        },
-        "ctrl_c2_payload_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.7516787983832338,
-          "recall_pool": 0.8609116640934823
-        },
-        "graph_b1q_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.7513275162203786,
-          "recall_pool": 0.8726726303999031
-        },
-        "graph_b1r_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.7591704154480685,
-          "recall_pool": 0.9259959737232464
-        },
-        "graph_b2q_ctx_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.7329821386969063,
-          "recall_pool": 0.8726726303999031
-        },
-        "graph_b2r_ctx_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.6729174476383236,
-          "recall_pool": 0.9259959737232464
-        },
-        "ladder_s2_cos_bm25_rr": {
-          "judged_at_5": 1.0,
-          "ndcg_at_5": 0.7516787983832338,
-          "recall_pool": 0.8609116640934823
-        }
-      },
-      "path_split": {
-        "q": {
-          "hits": 0,
-          "shares": {}
-        },
-        "r": {
-          "hits": 0,
-          "shares": {}
-        }
-      }
-    }
-  }
-}
+### Original set
+
+**Metrics**
+
+| metric | S2 | C0 | C1 | C2 | B1-r | B2-r | B1-q | B2-q |
+|---|---|---|---|---|---|---|---|---|
+| ndcg_at_5 | 0.7517 | 0.7593 | 0.7866 | 0.7517 | 0.7592 | 0.6729 | 0.7513 | 0.7330 |
+| recall_pool | 0.8609 | 0.9058 | 0.8912 | 0.8609 | 0.9260 | 0.9260 | 0.8727 | 0.8727 |
+| judged_at_5 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
+| n | 22 | 22 | 22 | 22 | 22 | 22 | 22 | 22 |
+
+**Verdicts**
+
+| base | new | n | mean_delta | ci_low | ci_high | verdict |
+|---|---|---|---|---|---|---|
+| S2 | C0 | 22 | 0.0076 | -0.0057 | 0.0254 | no detectable difference at n=22 |
+| S2 | C1 | 22 | 0.0349 | -0.0058 | 0.0770 | no detectable difference at n=22 |
+| S2 | C2 | 22 | 0.0000 | 0.0000 | 0.0000 | no detectable difference at n=22 |
+| C0 | B2-r | 22 | -0.0864 | -0.1742 | -0.0033 | regressed |
+| C1 | B2-r | 22 | -0.1136 | -0.2081 | -0.0221 | regressed |
+| C2 | B2-r | 22 | -0.0788 | -0.1664 | 0.0047 | no detectable difference at n=22 |
+| C0 | B2-q | 22 | -0.0263 | -0.0609 | 0.0030 | no detectable difference at n=22 |
+| C1 | B2-q | 22 | -0.0536 | -0.0892 | -0.0227 | regressed |
+| C2 | B2-q | 22 | -0.0187 | -0.0546 | 0.0106 | no detectable difference at n=22 |
+| B1-r | B2-r | 22 | -0.0863 | -0.1745 | -0.0029 | regressed |
+| B1-q | B2-q | 22 | -0.0183 | -0.0537 | 0.0107 | no detectable difference at n=22 |
+
+**Predictions held**
+
+| base | new | owner_prediction | owner_prediction_held | planner_prediction | planner_prediction_held |
+|---|---|---|---|---|---|
+| S2 | C0 | improved | False | no detectable difference | True |
+| S2 | C1 | None | None | no detectable difference | True |
+| S2 | C2 | None | None | no detectable difference | True |
+| C0 | B2-r | None | None | no detectable difference | False |
+| C1 | B2-r | None | None | no detectable difference | False |
+| C2 | B2-r | None | None | no detectable difference | True |
+| C0 | B2-q | None | None | no detectable difference | True |
+| C1 | B2-q | None | None | no detectable difference | False |
+| C2 | B2-q | None | None | no detectable difference | True |
+| B1-r | B2-r | None | None | no detectable difference | False |
+| B1-q | B2-q | None | None | no detectable difference | True |
+
+**Decisions**
+
+| start | branch | step1_deeper_pool | step2_graph_over_c0 | step3_graph_over_shortcuts |
+|---|---|---|---|---|
+| r | GRAPH OUT | False | False | False |
+| q | GRAPH OUT | False | False | False |
+
+**Path split**
+
+| start | hits | shares |
+|---|---|---|
+| r | 2 | topic=0.50, entity=0.50 |
+| q | 0 |  |
+
+### Graph set
+
+**Metrics**
+
+| metric | S2 | C0 | C1 | C2 | B1-r | B2-r | B1-q | B2-q |
+|---|---|---|---|---|---|---|---|---|
+| ndcg_at_5 | 0.6838 | 0.6892 | 0.8365 | 0.6838 | 0.6892 | 0.6287 | 0.6838 | 0.6901 |
+| recall_pool | 0.7402 | 0.8557 | 0.9773 | 0.7402 | 0.9773 | 0.9773 | 0.7818 | 0.7818 |
+| judged_at_5 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
+| n | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 8 |
+
+**Verdicts**
+
+| base | new | n | mean_delta | ci_low | ci_high | verdict |
+|---|---|---|---|---|---|---|
+| S2 | C0 | 8 | 0.0054 | 0.0000 | 0.0162 | no detectable difference at n=8 |
+| S2 | C1 | 8 | 0.1527 | 0.0288 | 0.2750 | improved |
+| S2 | C2 | 8 | 0.0000 | 0.0000 | 0.0000 | no detectable difference at n=8 |
+| C0 | B2-r | 8 | -0.0605 | -0.1666 | 0.0749 | no detectable difference at n=8 |
+| C1 | B2-r | 8 | -0.2078 | -0.3314 | -0.0916 | regressed |
+| C2 | B2-r | 8 | -0.0551 | -0.1652 | 0.0806 | no detectable difference at n=8 |
+| C0 | B2-q | 8 | 0.0008 | -0.0162 | 0.0187 | no detectable difference at n=8 |
+| C1 | B2-q | 8 | -0.1465 | -0.2688 | -0.0250 | regressed |
+| C2 | B2-q | 8 | 0.0062 | 0.0000 | 0.0187 | no detectable difference at n=8 |
+| B1-r | B2-r | 8 | -0.0605 | -0.1666 | 0.0749 | no detectable difference at n=8 |
+| B1-q | B2-q | 8 | 0.0062 | 0.0000 | 0.0187 | no detectable difference at n=8 |
+
+**Predictions held**
+
+| base | new | owner_prediction | owner_prediction_held | planner_prediction | planner_prediction_held |
+|---|---|---|---|---|---|
+| S2 | C0 | None | None | None | None |
+| S2 | C1 | None | None | None | None |
+| S2 | C2 | None | None | None | None |
+| C0 | B2-r | None | None | None | None |
+| C1 | B2-r | None | None | None | None |
+| C2 | B2-r | None | None | None | None |
+| C0 | B2-q | None | None | None | None |
+| C1 | B2-q | None | None | None | None |
+| C2 | B2-q | None | None | None | None |
+| B1-r | B2-r | improved | False | None | None |
+| B1-q | B2-q | improved | False | None | None |
+
+**Decisions**
+
+| start | branch | step1_deeper_pool | step2_graph_over_c0 | step3_graph_over_shortcuts |
+|---|---|---|---|---|
+| r | GRAPH OUT | False | False | False |
+| q | GRAPH OUT | False | False | False |
+
+**Path split**
+
+| start | hits | shares |
+|---|---|---|
+| r | 1 | contains=1.00 |
+| q | 0 |  |
