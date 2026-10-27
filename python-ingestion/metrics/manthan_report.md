@@ -297,3 +297,440 @@ n=22 answerable queries.
 - rrf: n=25, p50=0.0ms, p95=0.0ms
 - rerank_cpu: n=25, p50=52.8ms, p95=70.0ms
 - rerank_gpu: n=25, p50=6.0ms, p95=14.4ms
+
+## Appendix D — Graph as candidate generator
+
+Disclosure (D18): the planner drafted the 8 questions (2026-10-23) from documents.jsonl text only, and the owner adjusted them. The planner had already seen connector degrees (section 2.3) before drafting.
+
+grader view (D24): the original-set top-up sheet shows doc text only, as Run A. The graph-set sheet shows message text plus the titles of its in-corpus shared links, in candidate_id order.
+
+{
+  "sets": {
+    "graph": {
+      "comparisons": [
+        {
+          "base": "ladder_s2_cos_bm25_rr",
+          "ci_high": 0.016210505188746574,
+          "ci_low": 0.0,
+          "mean_delta": 0.005403501729582191,
+          "n": 8,
+          "new": "ctrl_c0_deeper_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": null,
+          "planner_prediction_held": null,
+          "verdict": "no detectable difference at n=8"
+        },
+        {
+          "base": "ladder_s2_cos_bm25_rr",
+          "ci_high": 0.2750275597477409,
+          "ci_low": 0.028849971431620824,
+          "mean_delta": 0.15269355186461558,
+          "n": 8,
+          "new": "ctrl_c1_denorm_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": null,
+          "planner_prediction_held": null,
+          "verdict": "improved"
+        },
+        {
+          "base": "ladder_s2_cos_bm25_rr",
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "mean_delta": 0.0,
+          "n": 8,
+          "new": "ctrl_c2_payload_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": null,
+          "planner_prediction_held": null,
+          "verdict": "no detectable difference at n=8"
+        },
+        {
+          "base": "ctrl_c0_deeper_rr",
+          "ci_high": 0.0749121859030277,
+          "ci_low": -0.166580901731833,
+          "mean_delta": -0.060527123408201725,
+          "n": 8,
+          "new": "graph_b2r_ctx_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": null,
+          "planner_prediction_held": null,
+          "verdict": "no detectable difference at n=8"
+        },
+        {
+          "base": "ctrl_c1_denorm_rr",
+          "ci_high": -0.09161987847648576,
+          "ci_low": -0.3314044290196765,
+          "mean_delta": -0.20781717354323512,
+          "n": 8,
+          "new": "graph_b2r_ctx_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": null,
+          "planner_prediction_held": null,
+          "verdict": "regressed"
+        },
+        {
+          "base": "ctrl_c2_payload_rr",
+          "ci_high": 0.08062908862830664,
+          "ci_low": -0.16521416094842944,
+          "mean_delta": -0.05512362167861953,
+          "n": 8,
+          "new": "graph_b2r_ctx_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": null,
+          "planner_prediction_held": null,
+          "verdict": "no detectable difference at n=8"
+        },
+        {
+          "base": "ctrl_c0_deeper_rr",
+          "ci_high": 0.018723226184554284,
+          "ci_low": -0.016210505188746574,
+          "mean_delta": 0.0008375736652692367,
+          "n": 8,
+          "new": "graph_b2q_ctx_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": null,
+          "planner_prediction_held": null,
+          "verdict": "no detectable difference at n=8"
+        },
+        {
+          "base": "ctrl_c1_denorm_rr",
+          "ci_high": -0.0249712965634815,
+          "ci_low": -0.26878648435288943,
+          "mean_delta": -0.14645247646976417,
+          "n": 8,
+          "new": "graph_b2q_ctx_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": null,
+          "planner_prediction_held": null,
+          "verdict": "regressed"
+        },
+        {
+          "base": "ctrl_c2_payload_rr",
+          "ci_high": 0.018723226184554284,
+          "ci_low": 0.0,
+          "mean_delta": 0.006241075394851428,
+          "n": 8,
+          "new": "graph_b2q_ctx_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": null,
+          "planner_prediction_held": null,
+          "verdict": "no detectable difference at n=8"
+        },
+        {
+          "base": "graph_b1r_rr",
+          "ci_high": 0.0749121859030277,
+          "ci_low": -0.166580901731833,
+          "mean_delta": -0.060527123408201725,
+          "n": 8,
+          "new": "graph_b2r_ctx_rr",
+          "owner_prediction": "improved",
+          "owner_prediction_held": false,
+          "planner_prediction": null,
+          "planner_prediction_held": null,
+          "verdict": "no detectable difference at n=8"
+        },
+        {
+          "base": "graph_b1q_rr",
+          "ci_high": 0.018723226184554284,
+          "ci_low": 0.0,
+          "mean_delta": 0.006241075394851428,
+          "n": 8,
+          "new": "graph_b2q_ctx_rr",
+          "owner_prediction": "improved",
+          "owner_prediction_held": false,
+          "planner_prediction": null,
+          "planner_prediction_held": null,
+          "verdict": "no detectable difference at n=8"
+        }
+      ],
+      "decisions": {
+        "q": {
+          "branch": "GRAPH OUT",
+          "step1_deeper_pool": false,
+          "step2_graph_over_c0": false,
+          "step3_graph_over_shortcuts": false
+        },
+        "r": {
+          "branch": "GRAPH OUT",
+          "step1_deeper_pool": false,
+          "step2_graph_over_c0": false,
+          "step3_graph_over_shortcuts": false
+        }
+      },
+      "metrics": {
+        "ctrl_c0_deeper_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.6892438994529767,
+          "recall_pool": 0.8556818181818182
+        },
+        "ctrl_c1_denorm_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.8365339495880101,
+          "recall_pool": 0.9772727272727273
+        },
+        "ctrl_c2_payload_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.6838403977233944,
+          "recall_pool": 0.7401515151515151
+        },
+        "graph_b1q_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.6838403977233944,
+          "recall_pool": 0.7818181818181819
+        },
+        "graph_b1r_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.6892438994529767,
+          "recall_pool": 0.9772727272727273
+        },
+        "graph_b2q_ctx_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.690081473118246,
+          "recall_pool": 0.7818181818181819
+        },
+        "graph_b2r_ctx_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.6287167760447749,
+          "recall_pool": 0.9772727272727273
+        },
+        "ladder_s2_cos_bm25_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.6838403977233944,
+          "recall_pool": 0.7401515151515151
+        }
+      },
+      "path_split": {
+        "q": {
+          "hits": 0,
+          "shares": {}
+        },
+        "r": {
+          "hits": 0,
+          "shares": {}
+        }
+      }
+    },
+    "original": {
+      "comparisons": [
+        {
+          "base": "ladder_s2_cos_bm25_rr",
+          "ci_high": 0.025358738614439876,
+          "ci_low": -0.005654354185717808,
+          "mean_delta": 0.007636417285628141,
+          "n": 22,
+          "new": "ctrl_c0_deeper_rr",
+          "owner_prediction": "improved",
+          "owner_prediction_held": false,
+          "planner_prediction": "no detectable difference",
+          "planner_prediction_held": false,
+          "verdict": "no detectable difference at n=22"
+        },
+        {
+          "base": "ladder_s2_cos_bm25_rr",
+          "ci_high": 0.07700503098647746,
+          "ci_low": -0.0058334899679854495,
+          "mean_delta": 0.03487196675021214,
+          "n": 22,
+          "new": "ctrl_c1_denorm_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": "no detectable difference",
+          "planner_prediction_held": false,
+          "verdict": "no detectable difference at n=22"
+        },
+        {
+          "base": "ladder_s2_cos_bm25_rr",
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "mean_delta": 0.0,
+          "n": 22,
+          "new": "ctrl_c2_payload_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": "no detectable difference",
+          "planner_prediction_held": false,
+          "verdict": "no detectable difference at n=22"
+        },
+        {
+          "base": "ctrl_c0_deeper_rr",
+          "ci_high": -0.0033181599992767544,
+          "ci_low": -0.17420303442183704,
+          "mean_delta": -0.08639776803053834,
+          "n": 22,
+          "new": "graph_b2r_ctx_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": "no detectable difference",
+          "planner_prediction_held": false,
+          "verdict": "regressed"
+        },
+        {
+          "base": "ctrl_c1_denorm_rr",
+          "ci_high": -0.022134897145858482,
+          "ci_low": -0.20810177495713605,
+          "mean_delta": -0.11363331749512233,
+          "n": 22,
+          "new": "graph_b2r_ctx_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": "no detectable difference",
+          "planner_prediction_held": false,
+          "verdict": "regressed"
+        },
+        {
+          "base": "ctrl_c2_payload_rr",
+          "ci_high": 0.004693035435385707,
+          "ci_low": -0.16643185699478033,
+          "mean_delta": -0.07876135074491018,
+          "n": 22,
+          "new": "graph_b2r_ctx_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": "no detectable difference",
+          "planner_prediction_held": false,
+          "verdict": "no detectable difference at n=22"
+        },
+        {
+          "base": "ctrl_c0_deeper_rr",
+          "ci_high": 0.003017255426662249,
+          "ci_low": -0.06094659624513776,
+          "mean_delta": -0.02633307697195566,
+          "n": 22,
+          "new": "graph_b2q_ctx_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": "no detectable difference",
+          "planner_prediction_held": false,
+          "verdict": "no detectable difference at n=22"
+        },
+        {
+          "base": "ctrl_c1_denorm_rr",
+          "ci_high": -0.022677161305139023,
+          "ci_low": -0.08922224456193145,
+          "mean_delta": -0.05356862643653966,
+          "n": 22,
+          "new": "graph_b2q_ctx_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": "no detectable difference",
+          "planner_prediction_held": false,
+          "verdict": "regressed"
+        },
+        {
+          "base": "ctrl_c2_payload_rr",
+          "ci_high": 0.010631039939369797,
+          "ci_low": -0.05463288229681051,
+          "mean_delta": -0.018696659686327513,
+          "n": 22,
+          "new": "graph_b2q_ctx_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": "no detectable difference",
+          "planner_prediction_held": false,
+          "verdict": "no detectable difference at n=22"
+        },
+        {
+          "base": "graph_b1r_rr",
+          "ci_high": -0.002857385802283235,
+          "ci_low": -0.17451888954429826,
+          "mean_delta": -0.08625296780974491,
+          "n": 22,
+          "new": "graph_b2r_ctx_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": "no detectable difference",
+          "planner_prediction_held": false,
+          "verdict": "regressed"
+        },
+        {
+          "base": "graph_b1q_rr",
+          "ci_high": 0.010654402714060523,
+          "ci_low": -0.05372100605001185,
+          "mean_delta": -0.018345377523472196,
+          "n": 22,
+          "new": "graph_b2q_ctx_rr",
+          "owner_prediction": null,
+          "owner_prediction_held": null,
+          "planner_prediction": "no detectable difference",
+          "planner_prediction_held": false,
+          "verdict": "no detectable difference at n=22"
+        }
+      ],
+      "decisions": {
+        "q": {
+          "branch": "GRAPH OUT",
+          "step1_deeper_pool": false,
+          "step2_graph_over_c0": false,
+          "step3_graph_over_shortcuts": false
+        },
+        "r": {
+          "branch": "GRAPH OUT",
+          "step1_deeper_pool": false,
+          "step2_graph_over_c0": false,
+          "step3_graph_over_shortcuts": false
+        }
+      },
+      "metrics": {
+        "ctrl_c0_deeper_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.7593152156688621,
+          "recall_pool": 0.9057675657675657
+        },
+        "ctrl_c1_denorm_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.786550765133446,
+          "recall_pool": 0.891163382072473
+        },
+        "ctrl_c2_payload_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.7516787983832338,
+          "recall_pool": 0.8609116640934823
+        },
+        "graph_b1q_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.7513275162203786,
+          "recall_pool": 0.8726726303999031
+        },
+        "graph_b1r_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.7591704154480685,
+          "recall_pool": 0.9259959737232464
+        },
+        "graph_b2q_ctx_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.7329821386969063,
+          "recall_pool": 0.8726726303999031
+        },
+        "graph_b2r_ctx_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.6729174476383236,
+          "recall_pool": 0.9259959737232464
+        },
+        "ladder_s2_cos_bm25_rr": {
+          "judged_at_5": 1.0,
+          "ndcg_at_5": 0.7516787983832338,
+          "recall_pool": 0.8609116640934823
+        }
+      },
+      "path_split": {
+        "q": {
+          "hits": 0,
+          "shares": {}
+        },
+        "r": {
+          "hits": 0,
+          "shares": {}
+        }
+      }
+    }
+  }
+}
