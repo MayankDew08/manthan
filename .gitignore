@@ -54,3 +54,7 @@ local.settings.json
 tmp/
 logs/
 .run/
+
+# Eval query sets stay local (they describe private group content)
+queries.csv
+queries_graph.csv
