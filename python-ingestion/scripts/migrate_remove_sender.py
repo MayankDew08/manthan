@@ -71,7 +71,9 @@ def audit_qdrant(collection):
     from qdrant_client import QdrantClient
     host = os.environ.get("QDRANT_HOST", "localhost")
     port = int(os.environ.get("QDRANT_PORT", "6333"))
-    client = QdrantClient(host=host, port=port)
+    client = QdrantClient(host=host, port=port,
+                          api_key=os.environ.get("QDRANT_API_KEY") or None,
+                          https=False)
     try:
         out = {}
         # Both the legacy and "-fresh" collections may hold sender-keyed points.
@@ -142,7 +144,9 @@ def main():
 
         from qdrant_client import QdrantClient
         qc = QdrantClient(host=os.environ.get("QDRANT_HOST", "localhost"),
-                          port=int(os.environ.get("QDRANT_PORT", "6333")))
+                          port=int(os.environ.get("QDRANT_PORT", "6333")),
+                          api_key=os.environ.get("QDRANT_API_KEY") or None,
+                          https=False)
         try:
             for name in dict.fromkeys([args.collection, "manthan", "manthan-fresh"]):
                 try:

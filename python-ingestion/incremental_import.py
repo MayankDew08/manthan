@@ -1,5 +1,6 @@
 from pathlib import Path
 import datetime as _dt
+import hashlib
 import os
 import re
 import tempfile
@@ -10,6 +11,8 @@ from heuristic_filter import heuristic_filter
 from main import run_pipeline
 from ingest import build_records_node
 from pipeline import push_to_stores, MIN_QUALITY
+
+_PLACEHOLDER_AUTHOR = "x"
 
 
 def _summary(total: int, already: int, new: int,
@@ -24,21 +27,36 @@ def _summary(total: int, already: int, new: int,
     }
 
 
-def _serialize_messages(messages, path: str) -> None:
-    """Write messages to a WhatsApp-style temp file that parses back identically.
+def _serialized_text(messages) -> str:
+    """WhatsApp-style text for ``messages`` that ``parser.parse_chat`` reads back identically.
 
     ``run_pipeline`` (the existing graph) parses a file, so the unseen subset is
     serialized here. The format and multiline/media handling match ``parser.parse_chat``
     so the graph's heuristic partition equals the one we compute locally.
     """
-    with open(path, "w", encoding="utf-8") as f:
-        for d in messages:
-            dt = _dt.datetime.fromisoformat(d.datetime_iso)
-            head = dt.strftime("%d/%m/%Y, %I:%M:%S %p")
-            parts = d.text.split("\n")
-            f.write(f"{head} - {parts[0]}\n")
-            for extra in parts[1:]:
-                f.write(extra + "\n")
+    lines = []
+    for d in messages:
+        dt = _dt.datetime.fromisoformat(d.datetime_iso)
+        head = dt.strftime("%d/%m/%Y, %I:%M:%S %p")
+        parts = d.text.split("\n")
+        # parse_chat treats a header with no "author: " prefix as a WhatsApp
+        # system event and skips it, so emit a fixed placeholder author. The
+        # parser discards it again; it is not an identity.
+        lines.append(f"{head} - {_PLACEHOLDER_AUTHOR}: {parts[0]}")
+        lines.extend(parts[1:])
+    return "".join(line + "\n" for line in lines)
+
+
+def _batch_path(source_id: str, revision, content: str) -> str:
+    """Temp path for a batch; run_pipeline derives its checkpoint thread from it.
+
+    The content digest keeps a different batch from ever resuming an unfinished
+    run left on the same source+revision (e.g. after revisions are reset), while
+    a crash on the *same* batch still resumes its own checkpoint.
+    """
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{source_id}-{revision}")
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+    return os.path.join(tempfile.gettempdir(), f"manthan-batch-{safe}-{digest}.txt")
 
 
 def _heuristic_split(messages):
@@ -52,7 +70,7 @@ def _heuristic_split(messages):
 def run_incremental_import(
     source_id: str,
     file_path: str,
-    revision: int,
+    revision: int | str,
     db_path: str = "import_state.sqlite",
 ) -> dict:
     """Ingest only the messages not yet seen, via the existing LangGraph pipeline.
@@ -79,6 +97,9 @@ def run_incremental_import(
         new_count = len(unseen_ids)
         if new_count == 0:
             # Fully processed through this revision: advance it, no Gemma calls.
+            if total == 0:
+                print(f"WARNING: parsed 0 messages from {file_path} "
+                      f"— unsupported chat format? Nothing stored.")
             store.update_source_revision(source_id, str(revision))
             return _summary(total, total, 0, 0, 0, 0)
 
@@ -90,9 +111,10 @@ def run_incremental_import(
         # file below, in the same order.
         kept_unseen, discarded_unseen = _heuristic_split(unseen)
 
-        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{source_id}-{revision}")
-        tmp_path = os.path.join(tempfile.gettempdir(), f"manthan-batch-{safe}.txt")
-        _serialize_messages(unseen, tmp_path)
+        content = _serialized_text(unseen)
+        tmp_path = _batch_path(source_id, revision, content)
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(content)
 
         try:
             # Existing graph: heuristic (first node) -> grade -> link scrape -> merge
@@ -105,6 +127,15 @@ def run_incremental_import(
                 raise RuntimeError(
                     f"graph graded {len(final)} messages but {len(kept_unseen)} "
                     f"were expected after heuristic filtering"
+                )
+            # Counts alone cannot catch a resumed stale run that graded other
+            # texts (2026-10-09: 148 empty-text grades passed as 148 == 148).
+            stale = next((i for i, (g, d) in enumerate(zip(final, kept_unseen))
+                          if g.original_text != d.text), None)
+            if stale is not None:
+                raise RuntimeError(
+                    f"graph grades do not match this batch (first mismatch at "
+                    f"message {stale}); refusing to record outcomes"
                 )
 
             # Build full Message records (linkless included) via the existing node fn.

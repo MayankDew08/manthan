@@ -1,0 +1,26 @@
+query_id,query_text,intent,origin,split,notes
+q001,What tools did people recommend for coordinating several coding agents running in parallel?,recommendation,real,development,Expect agent-orchestrator / fleet-manager style tools plus control-plane options
+q002,Which open-source options were shared for vector search or RAG without a hosted vector database?,recommendation,real,development,Expect Qdrant and ParadeDB specifically; pgvector mention is partial
+q003,What did the group say about retrieval quality and reranking in RAG systems?,concept,real,development,Split across rerank-before-answer claim and the RAG survey
+q004,Who in this group has built observability or governance tooling for AI agents?,person_lookup,real,development,ClawMetry author and the ClawMetry project links
+q005,What local setup did someone describe for running their own model to do coding and design work?,concept,real,development,"Expect llama.cpp, Qwen dense vs MoE, Hermes; RTX/Ollama intros are weaker matches"
+q006,Did anyone describe a situation where an AI coding assistant was tricked into exposing confidential source code it shouldn't have had access to?,concept,real,development,Paraphrase: avoids 'prompt injection'/'leak'. Expect the Noma Security GitLost case study (link + message).
+q007,"Was there a discussion about engineers running themselves, or their AI agents, too hard, and the value of pacing or resting?",concept,real,development,Paraphrase: avoids 'burnout'/'sleep'. Expect the 'sleep and let your agents sleep' message.
+q008,Did someone summarize a talk arguing AI should be understood as making independent decisions rather than just executing instructions?,concept,real,development,Paraphrase: avoids 'agent'/'tool'/'Harari'. Expect the Harari lecture summary message.
+q009,Did someone criticize the practice of giving take-home tests to job candidates?,concept,real,development,Paraphrase: avoids 'hiring assignment'/'evaluation process'. Expect the 'Never a big fan of hiring assignments' message.
+q010,What complete personal workflow for using coding agents did someone share that was originally posted on Twitter?,concept,real,development,"Long-document: expect the 1068-token 'Jamon's set up' message, truncated at 256 tokens."
+q011,"What hard coding projects, like a racing simulation or sports-management game, did someone use to test LLMs on complex logic?",concept,real,development,"Long-document: expect the 624-token 'fellow traveler's notes' message (F1 strategy + cricket manager sim), truncated."
+q012,What optimizations did someone need to run a large local language model on a single consumer GPU?,concept,real,development,Long-document. Expect the Oct 7 qwen3.8-27b/RTX 3090 message. May partially overlap with q005's expected answers.
+q013,What open-source tool was shared for understanding why LLMs hallucinate by looking inside the model?,recommendation,real,development,Long-document: expect the 'Anima' interpretability tool messages (truncated) and its GitHub link.
+q014,Who works on AI infrastructure at Google Cloud?,person_lookup,real,development,Expect Kumar Abhishek's introduction message.
+q015,Who's a recent IIIT Delhi graduate who worked on a wildlife-related project?,person_lookup,real,development,Expect Vaibhav's introduction mentioning IIIT Delhi and WII (Wildlife Institute of India).
+q016,Who works as an SDE-3 doing agentic data scraping with LLMs?,person_lookup,real,development,Expect Ayush Anand's introduction (Draup).
+q017,Who founded an applied AI lab and is building an 'AI employee' product?,person_lookup,real,development,Expect nishank's introduction (zonko.ai / luffy.so).
+q018,When was the open-source LLM interpretability tool Anima first shared in the group?,temporal,real,development,"Expect 2026-07-21. Tests whether retrieval finds the correctly-dated message, not just topical matches."
+q019,When did someone share the case study about an AI agent being tricked into leaking a GitHub repo?,temporal,real,development,Expect 2026-07-16 (the Noma Security GitLost message).
+q020,When was the summary of Harari's AI lecture posted?,temporal,real,development,Expect 2026-08-26.
+q021,When did someone first demo or walk the group through the spec-kit tool?,temporal,real,development,Expect 2026-06-06 (the message thanking Vinay Shenoy for walking through github/spec-kit).
+q022,Did anyone in the group describe fine-tuning a model with LoRA and share specific hyperparameters or results?,no_answer,real,development,"Expect no relevant document. 'LoRA' appears once in passing, in a founder bio, with zero fine-tuning detail."
+q023,Did anyone discuss deploying AI agents using Docker or Kubernetes containers in production?,no_answer,real,development,Expect no relevant document. 'docker': 0 hits; 'kubernetes' appears only in two people's job-title bios.
+q024,Was there any discussion about salary negotiation or compensation benchmarks for AI engineering roles?,no_answer,real,development,Expect no relevant document; this topic does not appear in the corpus.
+q025,Did anyone announce a funding round or acquisition for their startup in this group?,no_answer,real,development,Expect no relevant document; members mention founding startups but none announce funding/acquisition news.

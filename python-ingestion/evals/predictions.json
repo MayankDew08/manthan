@@ -1,0 +1,22 @@
+{
+  "q001": {
+    "expected": "success",
+    "reason": "Agent Orchestrator link is cosine #1 (0.70). Expect weak nDCG: self-introductions take #3-#5."
+  },
+  "q002": {
+    "expected": "success",
+    "reason": "qdrant link #1, paradedb link #3, pgvector message #4. All three answers inside the top 5."
+  },
+  "q003": {
+    "expected": "success",
+    "reason": "'always rerank before answering' message is #1 (0.71) and the RAG survey link is #2."
+  },
+  "q004": {
+    "expected": "success",
+    "reason": "ClawMetry author's message is #1 (0.62); expect the next results to be self-introductions (distractors)."
+  },
+  "q005": {
+    "expected": "failure",
+    "reason": "Best answer is a 1,132-token 'Local Model Setup' message at cosine #38 (0.30), truncated at 256 tokens. Predicted long_document_miss."
+  }
+}

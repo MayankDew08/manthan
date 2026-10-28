@@ -59,7 +59,7 @@ def list_files(
         results = (
             service.files()
             .list(
-                q=f"'{folder_id}' in parents",
+                q=f"'{folder_id}' in parents and trashed = false",
                 pageSize=page_size,
                 fields="nextPageToken, files(id, name, mimeType)",
                 pageToken=page_token,

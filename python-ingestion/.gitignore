@@ -16,7 +16,14 @@ ask_user_links.json
 enriched_messages.json
 state.json
 discarded_log.json
-evals/
+# Eval outputs (evals/data/, runs, annotation sheets) contain chat text; only
+# reviewed code and the hand-written pool keyword list are tracked.
+evals/*
+!evals/*.py
+!evals/pool_keywords.json
+!evals/predictions.json
+!evals/ladder_predictions.json
+!evals/graph_expand_predictions.json
 
 # Metrics / Reports
 metrics/*.md

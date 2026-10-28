@@ -1,0 +1,34 @@
+{
+  "_notes": "Pre-registered before any ladder step was computed (docs/retrieval-ladder-spec.md section 11). Written by the planning agent from priors and query design only; no BM25, fusion, graph or reranker result was computed or inspected. These are predictions, not results. LOCKED: listed in tests/LOCK.sha256.",
+  "registered_at": "2026-10-18",
+  "comparisons": {
+    "ladder_s0_cosine->ladder_s1_cos_bm25": {
+      "expected_verdict": "no detectable difference",
+      "reason": "BM25 should help exact-name queries (q006 GitLost, q013 Anima, q014-q017 people and companies), but cosine likely already finds several of them, and RRF can also demote a strong cosine #1 that BM25 ranks low. Expect a small positive mean delta whose CI crosses 0 at n=22, wins concentrated in person_lookup/temporal, and Candidate Success@30 >= step 0."
+    },
+    "ladder_s1_cos_bm25->ladder_s2_cos_bm25_rr": {
+      "expected_verdict": "improved",
+      "reason": "The cross-encoder reads query and document together, up to 512 tokens (26 of the 30 truncated documents fully), and should demote the self-introduction distractors that sit in cosine's top 5 on non-person queries. Risk: informal WhatsApp text is far from MS MARCO, so the gain could be smaller than on web passages."
+    },
+    "ladder_s1_cos_bm25->ladder_s3_cos_bm25_graph": {
+      "expected_verdict": "no detectable difference",
+      "reason": "graph_lexical_v0 is substring keyword matching with no IDF, so it repeats BM25's signal, and does it worse (generic terms like 'group', 'when', 'first', 'llm' match a large share of messages). Expect at most 1-2 queries to change, Candidate Success@30 equal or +1, raw graph counts above 100 for queries with generic words, and a non-zero out-of-corpus count."
+    },
+    "ladder_s3_cos_bm25_graph->ladder_s4_cos_bm25_graph_rr": {
+      "expected_verdict": "improved",
+      "reason": "Same mechanism as s1->s2: re-ordering 30 candidates with a cross-encoder."
+    },
+    "ladder_s2_cos_bm25_rr->ladder_s4_cos_bm25_graph_rr": {
+      "expected_verdict": "no detectable difference",
+      "reason": "This is the graph's effect once a re-ranker is present. The graph should add few relevant candidates that cosine+BM25 missed, and the re-ranker should push any graph noise it adds out of the top 5."
+    },
+    "ladder_s0_cosine->ladder_s4_cos_bm25_graph_rr": {
+      "expected_verdict": "improved",
+      "reason": "End to end, driven mainly by the re-ranker, not by BM25 or the graph."
+    }
+  },
+  "observations": {
+    "abstention": "Cross-encoder top-1 scores should separate no-answer queries (q022-q024) from answerable ones more clearly than cosine top-1 scores. With 3 no-answer queries this is reported as an observation only.",
+    "long_documents": "q005's best answer is 1,132 tokens, longer than even the cross-encoder's 512, so q005 should remain the weakest answerable query at every step."
+  }
+}
