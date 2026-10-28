@@ -19,9 +19,10 @@ import embedder
 import enhancer
 import ingest
 import pipeline
+import retrieval
+from evals.rerank import Reranker
 from link_extract import parse_github_url
 from link_ingest import mark_resolved
-from search import search
 from store import KnowledgeStore, _url_to_title
 from vector_store import VectorStore
 
@@ -104,6 +105,8 @@ async def lifespan(app: FastAPI):
     app.state.store = KnowledgeStore()
     app.state.vs = VectorStore()
     app.state.vs.ensure_collection()
+    app.state.reranker = Reranker()
+    app.state.corpus = retrieval.Corpus()
     yield
     app.state.vs.close()
     app.state.store.close()
@@ -120,18 +123,21 @@ def health():
 
 @app.post("/search")
 def do_search(req: SearchRequest):
-    """Run hybrid search with optional topic and quality filters."""
+    """Run S2 (cosine + BM25 + RRF + re-rank) with optional topic/quality filters."""
     t0 = time.monotonic()
     try:
-        results = search(req.query, topics=req.topics, min_quality=req.min_quality,
-                         top_k=req.top_k, vs=app.state.vs, store=app.state.store)
+        out = retrieval.search_s2(req.query, top_k=req.top_k, topics=req.topics,
+                                  min_quality=req.min_quality, vs=app.state.vs,
+                                  reranker=app.state.reranker, corpus=app.state.corpus)
     except Exception:  # pragma: no cover
-        SEARCH_REQUESTS.labels(engine="hybrid").inc()
+        SEARCH_REQUESTS.labels(engine="s2").inc()
         logger.exception("Search request failed")
         raise HTTPException(status_code=500, detail="search failed")
-    SEARCH_REQUESTS.labels(engine="hybrid").inc()
-    SEARCH_LATENCY.labels(engine="hybrid").observe(time.monotonic() - t0)
-    return {"query": req.query, "count": len(results), "results": results}
+    SEARCH_REQUESTS.labels(engine="s2").inc()
+    SEARCH_LATENCY.labels(engine="s2").observe(time.monotonic() - t0)
+    results = out["results"]
+    return {"query": req.query, "count": len(results), "results": results,
+            "confidence": out["confidence"], "top_score": out["top_score"]}
 
 
 def _run_ingest_job(job_id: str, chat_path: str, force: bool,

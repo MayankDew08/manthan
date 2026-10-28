@@ -21,10 +21,14 @@ def check(name, condition, extra=""):
 def run_all():
     FAILS.clear()
     private_detail = "private database path and credential"
-    original_search = app.search
-    app.search = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError(private_detail))
+    original_search_s2 = app.retrieval.search_s2
+    app.retrieval.search_s2 = lambda *args, **kwargs: (
+        _ for _ in ()
+    ).throw(RuntimeError(private_detail))
     app.app.state.vs = object()
     app.app.state.store = object()
+    app.app.state.reranker = object()
+    app.app.state.corpus = object()
     try:
         app.do_search(app.SearchRequest(query="test"))
     except HTTPException as exc:
@@ -32,7 +36,7 @@ def run_all():
         check("search errors do not expose internal detail", private_detail not in exc.detail,
               exc.detail)
     finally:
-        app.search = original_search
+        app.retrieval.search_s2 = original_search_s2
 
     original_ingest = app.pipeline.run_full_ingest
     app.pipeline.run_full_ingest = lambda *args, **kwargs: (
