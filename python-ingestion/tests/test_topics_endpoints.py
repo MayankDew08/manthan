@@ -326,6 +326,41 @@ def test_browse_topic_unknown_with_no_close_name_still_404s_cleanly():
     assert exc_info.value.status_code == 404
 
 
+# ---- SearchRequest.kind (spec section 4, item 3) ---------------------------------
+
+def test_search_request_kind_defaults_to_any():
+    assert app.SearchRequest(query="q").kind == "any"
+
+
+def test_search_request_kind_accepts_introduction():
+    assert app.SearchRequest(query="q", kind="introduction").kind == "introduction"
+
+
+def test_search_request_kind_rejects_anything_else():
+    with pytest.raises(Exception):  # pydantic ValidationError
+        app.SearchRequest(query="q", kind="not-a-real-kind")
+
+
+def test_do_search_passes_kind_through_to_search_s2():
+    seen = {}
+    original = app.retrieval.search_s2
+
+    def fake_search_s2(query, **kwargs):
+        seen.update(kwargs)
+        return {"results": [], "confidence": "none", "top_score": None}
+
+    app.retrieval.search_s2 = fake_search_s2
+    app.app.state.vs = object()
+    app.app.state.reranker = object()
+    app.app.state.corpus = object()
+    app.app.state.store = object()
+    try:
+        app.do_search(app.SearchRequest(query="q", kind="introduction"))
+    finally:
+        app.retrieval.search_s2 = original
+    assert seen["kind"] == "introduction"
+
+
 # ---- live (deselected unless --live) ---------------------------------------
 
 @pytest.mark.live

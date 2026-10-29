@@ -32,8 +32,14 @@ class FakeQdrantClient:
         self.scroll_calls = 0
         self.fail_scroll_at: Optional[int] = None
 
-    def count(self, collection_name, exact=True):
-        return SimpleNamespace(count=len(self.docs))
+    def count(self, collection_name, exact=True, count_filter=None):
+        if count_filter is None:
+            return SimpleNamespace(count=len(self.docs))
+        # retrieval.py only ever passes a filter here for the "has a
+        # category payload" check (item 4); the fake doesn't need to
+        # interpret the filter shape, just the one thing it counts.
+        return SimpleNamespace(
+            count=sum(1 for _pid, payload in self.docs if payload.get("category")))
 
     def scroll(self, collection_name, limit=256, offset=None, with_payload=False,
                with_vectors=False):
@@ -429,6 +435,26 @@ def test_corpus_rebuilds_only_when_collection_size_changes():
     corpus.refresh(vs)  # size grew: rebuild
     assert corpus.bm25 is not first_bm25
     assert "l1" in corpus.ids
+
+
+def test_corpus_rebuilds_when_category_payload_count_changes_even_if_size_is_unchanged():
+    """The backfill script only ``set_payload``s (point count unchanged);
+    refresh must still detect that, or kind="introduction" would find
+    nothing live until the process restarts (spec section 4, item 4)."""
+    docs = [_message("a", "alpha"), _message("b", "beta")]
+    vs = FakeVectorStore(docs, cosine_order=["a", "b"])
+    corpus = retrieval.Corpus()
+    corpus.refresh(vs)
+    first_bm25 = corpus.bm25
+    assert corpus.payloads["a"].get("category") is None
+
+    # same point count: one payload gains a "category" field in place
+    pid, payload = vs.client.docs[0]
+    vs.client.docs[0] = (pid, {**payload, "category": "introduction"})
+
+    corpus.refresh(vs)
+    assert corpus.bm25 is not first_bm25
+    assert corpus.payloads["a"]["category"] == "introduction"
 
 
 def test_corpus_refresh_leaves_old_snapshot_untouched_if_interrupted():

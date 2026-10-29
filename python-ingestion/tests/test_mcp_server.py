@@ -110,6 +110,22 @@ def test_search_truncated_flag_and_ellipsis_only_on_a_cut_snippet(tmp_path, monk
     assert len(by_id["l1"]["text"]) == 300
 
 
+def test_search_kind_defaults_to_any_and_is_posted_through(tmp_path, monkeypatch):
+    _use_log(tmp_path, monkeypatch)
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"results": [], "confidence": "none"})
+
+    _use_transport(handler, monkeypatch)
+    mcp_server.search("anything")
+    assert seen["body"]["kind"] == "any"
+
+    mcp_server.search("anything", kind="introduction")
+    assert seen["body"]["kind"] == "introduction"
+
+
 def test_search_unreachable_api_returns_instructional_text_not_a_raise(
         tmp_path, monkeypatch, capsys):
     _use_log(tmp_path, monkeypatch)
@@ -236,8 +252,14 @@ def test_server_instructions_say_cite():
     assert "cite" in mcp_server.INSTRUCTIONS
 
 
-def test_search_description_does_not_expose_kind_yet():
-    assert "kind=" not in mcp_server.SEARCH_DESCRIPTION
+def test_search_description_now_explains_kind_introduction():
+    """Phase 3 (spec section 4, item 3): the sentence deferred in Phase 2
+    is added back, exactly, right after the "not single keywords." line."""
+    sentence = ('Set kind="introduction" only when the user wants people to connect with: '
+               "it searches members' self-introductions.")
+    assert sentence in mcp_server.SEARCH_DESCRIPTION
+    assert mcp_server.SEARCH_DESCRIPTION.index("not single keywords.") < \
+        mcp_server.SEARCH_DESCRIPTION.index(sentence)
 
 
 # ---- live (deselected unless --live) ---------------------------------------
