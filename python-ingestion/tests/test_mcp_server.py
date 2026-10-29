@@ -140,6 +140,38 @@ def test_search_unreachable_api_returns_instructional_text_not_a_raise(
     assert capsys.readouterr().out == ""
 
 
+def test_search_timeout_returns_a_distinct_timeout_message_not_a_raise(
+        tmp_path, monkeypatch, capsys):
+    """A timeout means the API process is likely still starting up (the
+    cold-start model load) -- a different situation from "not reachable
+    at all", so it gets its own message."""
+    _use_log(tmp_path, monkeypatch)
+
+    def handler(request):
+        raise httpx.TimeoutException("timed out")
+
+    _use_transport(handler, monkeypatch)
+    out = mcp_server.search("anything")  # must not raise
+    assert out == (f"Manthan API timed out after {int(mcp_server.TIMEOUT)}s "
+                   "(it may still be starting up). Try again in a moment.")
+    assert "not reachable" not in out
+    assert capsys.readouterr().out == ""
+
+
+def test_timeout_exception_is_not_mistaken_for_an_unreachable_api(tmp_path, monkeypatch):
+    """httpx.TimeoutException is a subclass of httpx.RequestError; the
+    unreachable branch must not catch it ahead of the timeout branch."""
+    _use_log(tmp_path, monkeypatch)
+
+    def handler(request):
+        raise httpx.ConnectTimeout("connect timed out")
+
+    _use_transport(handler, monkeypatch)
+    out = mcp_server.get_item("m1")
+    assert "timed out" in out
+    assert "not reachable" not in out
+
+
 # ---- get_item -------------------------------------------------------------------
 
 def test_get_item_404_message_is_passed_through(tmp_path, monkeypatch, capsys):
