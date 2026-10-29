@@ -240,6 +240,42 @@ cd ../drive-relay
 uv run pytest tests -q   # relay validation, publishers, Function wrapper (all mocked, no Azure needed)
 ```
 
+## MCP server
+
+`python-ingestion/mcp_server.py` is a thin stdio adapter over the FastAPI app: it holds no DB clients and loads no models, only HTTP calls to `MANTHAN_API_URL` (default `http://localhost:8000`). Start the API first (`uv run uvicorn app:app` or the Docker Compose stack), then point an MCP client at the server.
+
+It exposes four read-only tools: `search`, `get_item`, `list_topics`, `browse_topic`.
+
+### Add it to Claude Code
+
+```bash
+claude mcp add manthan -- uv run --directory /path/to/manthan/python-ingestion python mcp_server.py
+```
+
+### Add it to Claude Desktop
+
+Add an entry under `mcpServers` in Claude Desktop's config (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "manthan": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/manthan/python-ingestion", "python", "mcp_server.py"]
+    }
+  }
+}
+```
+
+### Manual check (MCP Inspector)
+
+```bash
+cd python-ingestion
+uv run mcp dev mcp_server.py
+```
+
+Call each tool once in the Inspector UI to confirm it reaches the running API.
+
 ## Development
 
 Run the existing offline Python suite and the Go checks:

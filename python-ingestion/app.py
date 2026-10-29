@@ -366,6 +366,165 @@ def list_messages(topic: Optional[str] = None,
     return {"count": len(rows), "messages": rows}
 
 
+def _message_id(sent_at: Optional[str], text: Optional[str]) -> str:
+    """M8: the id vector_store.upsert_message gives this message in Qdrant."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"msg-{sent_at or ''}-{text or ''}"))
+
+
+def _link_id(url: Optional[str]) -> str:
+    """M8: the id vector_store.upsert_link gives this link in Qdrant."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"link-{url or ''}"))
+
+
+@app.get("/items/{item_id}")
+def get_item(item_id: str):
+    """One message or link's full record, found among all items by its M8 id."""
+    with app.state.store.driver.session() as session:
+        messages = session.run(
+            """
+            MATCH (m:Message)
+            OPTIONAL MATCH (m)-[:ABOUT]->(t:Topic)
+            OPTIONAL MATCH (m)-[:CONTAINS]->(l:Link)
+            RETURN m.sent_at AS sent_at, m.text AS text,
+                   collect(DISTINCT t.name) AS topics,
+                   collect(DISTINCT {url: l.url, title: l.title}) AS links
+            """
+        ).data()
+        for row in messages:
+            if _message_id(row["sent_at"], row["text"]) == item_id:
+                return {
+                    "id": item_id,
+                    "type": "message",
+                    "sent_at": row["sent_at"] or "",
+                    "text": row["text"] or "",
+                    "topics": [t for t in row["topics"] if t],
+                    "related_links": [lk for lk in row["links"] if lk.get("url")],
+                }
+
+        links = session.run(
+            """
+            MATCH (l:Link)
+            OPTIONAL MATCH (l)-[:ABOUT]->(t:Topic)
+            RETURN l.url AS url, l.title AS title, l.summary AS summary,
+                   l.sent_at AS sent_at, collect(DISTINCT t.name) AS topics
+            """
+        ).data()
+        for row in links:
+            if _link_id(row["url"]) == item_id:
+                return {
+                    "id": item_id,
+                    "type": "link",
+                    "sent_at": row.get("sent_at") or "",
+                    "text": row.get("summary") or "",
+                    "url": row.get("url") or "",
+                    "title": row.get("title") or "",
+                    "topics": [t for t in row["topics"] if t],
+                }
+    raise HTTPException(status_code=404, detail=f"unknown item id: {item_id}")
+
+
+def _topic_counts(session) -> dict:
+    """Topic name -> Messages + Links ABOUT it.
+
+    Two plain queries, not one combining them: an empty side dropping the
+    other's rows is exactly the retrieval.py graph-enrich bug (Phase 1).
+    """
+    message_rows = session.run(
+        "MATCH (m:Message)-[:ABOUT]->(t:Topic) RETURN t.name AS name, count(m) AS n"
+    ).data()
+    link_rows = session.run(
+        "MATCH (l:Link)-[:ABOUT]->(t:Topic) RETURN t.name AS name, count(l) AS n"
+    ).data()
+    counts: dict = {}
+    for row in message_rows + link_rows:
+        counts[row["name"]] = counts.get(row["name"], 0) + row["n"]
+    return counts
+
+
+@app.get("/topics")
+def list_topics():
+    """[{name, count}], count = Messages + Links ABOUT the topic, sorted desc."""
+    with app.state.store.driver.session() as session:
+        counts = _topic_counts(session)
+    topics = sorted(({"name": name, "count": n} for name, n in counts.items()),
+                    key=lambda t: (-t["count"], t["name"]))
+    return {"topics": topics}
+
+
+def _topic_items(session, name: str) -> list:
+    """Every message/link ABOUT ``name``, newest first, 300-char snippet."""
+    message_rows = session.run(
+        "MATCH (m:Message)-[:ABOUT]->(:Topic {name: $name}) "
+        "RETURN m.sent_at AS sent_at, m.text AS text",
+        name=name,
+    ).data()
+    link_rows = session.run(
+        "MATCH (l:Link)-[:ABOUT]->(:Topic {name: $name}) "
+        "RETURN l.url AS url, l.title AS title, l.summary AS summary, l.sent_at AS sent_at",
+        name=name,
+    ).data()
+    items = [
+        {"id": _message_id(row["sent_at"], row["text"]), "type": "message",
+         "sent_at": row["sent_at"] or "", "text": (row["text"] or "")[:300]}
+        for row in message_rows
+    ]
+    items += [
+        {"id": _link_id(row["url"]), "type": "link", "sent_at": row.get("sent_at") or "",
+         "text": (row.get("summary") or "")[:300], "url": row.get("url") or "",
+         "title": row.get("title") or ""}
+        for row in link_rows
+    ]
+    items.sort(key=lambda it: it["sent_at"], reverse=True)
+    return items
+
+
+def _topic_neighbors(session, name: str) -> list:
+    """Top 5 topics co-occurring on the same items as ``name``, with counts."""
+    message_rows = session.run(
+        "MATCH (:Topic {name: $name})<-[:ABOUT]-(m:Message)-[:ABOUT]->(other:Topic) "
+        "WHERE other.name <> $name "
+        "RETURN other.name AS name, count(DISTINCT m) AS n",
+        name=name,
+    ).data()
+    link_rows = session.run(
+        "MATCH (:Topic {name: $name})<-[:ABOUT]-(l:Link)-[:ABOUT]->(other:Topic) "
+        "WHERE other.name <> $name "
+        "RETURN other.name AS name, count(DISTINCT l) AS n",
+        name=name,
+    ).data()
+    counts: dict = {}
+    for row in message_rows + link_rows:
+        counts[row["name"]] = counts.get(row["name"], 0) + row["n"]
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [{"name": n, "count": c} for n, c in ranked[:5]]
+
+
+def _topic_suggestions(session, name: str) -> list:
+    """5 closest topic names by case-insensitive substring match, for a 404."""
+    rows = session.run("MATCH (t:Topic) RETURN t.name AS name").data()
+    needle = name.lower()
+    matches = [row["name"] for row in rows
+              if needle in row["name"].lower() or row["name"].lower() in needle]
+    matches.sort(key=lambda n: (abs(len(n) - len(name)), n))
+    return matches[:5]
+
+
+@app.get("/topics/{name}")
+def browse_topic(name: str, limit: int = Query(default=50, ge=1, le=500)):
+    """Every message/link ABOUT ``name``, newest first, plus total and neighbors."""
+    with app.state.store.driver.session() as session:
+        items = _topic_items(session, name)
+        if not items:
+            suggestions = _topic_suggestions(session, name)
+            detail = f"unknown topic: {name}"
+            if suggestions:
+                detail += f". Did you mean: {', '.join(suggestions)}?"
+            raise HTTPException(status_code=404, detail=detail)
+        neighbors = _topic_neighbors(session, name)
+    return {"topic": name, "total": len(items), "items": items[:limit],
+            "neighbors": neighbors}
+
+
 @app.get("/metrics")
 def prometheus_metrics():
     """Expose Prometheus metrics for the local deployment."""
