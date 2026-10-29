@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -376,151 +377,210 @@ def _link_id(url: Optional[str]) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"link-{url or ''}"))
 
 
+_TOPIC_KEY_NON_ALNUM = re.compile(r"[^a-z0-9]+")
+
+
+def topic_key(name: str) -> str:
+    """Fold topic spelling variants to one key.
+
+    Topics are free-text from the grader, so one idea gets several spellings
+    ("agentic-workflows", "Agentic Workflow"). Case, punctuation/whitespace,
+    and a simple trailing plural don't matter; different words still do --
+    "Agentic AI" stays its own key, distinct from "agentic-workflows".
+    """
+    collapsed = _TOPIC_KEY_NON_ALNUM.sub(" ", (name or "").lower()).strip()
+    words = []
+    for word in collapsed.split(" "):
+        if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+            word = word[:-1]
+        words.append(word)
+    return " ".join(words)
+
+
+SNIPPET_CHARS = 300
+
+
+def _snippet(text: str) -> dict:
+    """Cut to SNIPPET_CHARS, flagging the cut; a cut snippet ends with "…"."""
+    text = text or ""
+    if len(text) <= SNIPPET_CHARS:
+        return {"text": text, "truncated": False}
+    return {"text": text[:SNIPPET_CHARS - 1].rstrip() + "…", "truncated": True}
+
+
 @app.get("/items/{item_id}")
 def get_item(item_id: str):
-    """One message or link's full record, found among all items by its M8 id."""
+    """One message or link's full record. The id IS the Qdrant point id
+    (M8): retrieve it directly instead of scanning Neo4j, then one Neo4j
+    read for its topics and (message: related_links; link: earliest
+    attributing sent_at).
+    """
+    points = app.state.vs.client.retrieve(
+        collection_name=app.state.vs.collection, ids=[item_id], with_payload=True)
+    if not points:
+        raise HTTPException(status_code=404, detail=f"unknown item id: {item_id}")
+    payload = points[0].payload or {}
+
     with app.state.store.driver.session() as session:
-        messages = session.run(
+        if payload.get("type") == "link":
+            row = session.run(
+                """
+                MATCH (l:Link {url: $url})
+                OPTIONAL MATCH (l)-[:ABOUT]->(t:Topic)
+                OPTIONAL MATCH (m:Message)-[:CONTAINS]->(l)
+                RETURN collect(DISTINCT t.name) AS topics,
+                       min(m.sent_at) AS earliest_sent_at
+                """,
+                url=payload.get("url", ""),
+            ).single()
+            return {
+                "id": item_id,
+                "type": "link",
+                "sent_at": (row["earliest_sent_at"] if row else None) or "",
+                "text": payload.get("summary") or "",
+                "url": payload.get("url", ""),
+                "title": payload.get("title", ""),
+                "topics": [t for t in (row["topics"] if row else []) if t],
+            }
+
+        row = session.run(
             """
-            MATCH (m:Message)
+            MATCH (m:Message {sent_at: $sent_at, text: $text})
             OPTIONAL MATCH (m)-[:ABOUT]->(t:Topic)
             OPTIONAL MATCH (m)-[:CONTAINS]->(l:Link)
-            RETURN m.sent_at AS sent_at, m.text AS text,
-                   collect(DISTINCT t.name) AS topics,
+            RETURN collect(DISTINCT t.name) AS topics,
                    collect(DISTINCT {url: l.url, title: l.title}) AS links
-            """
-        ).data()
-        for row in messages:
-            if _message_id(row["sent_at"], row["text"]) == item_id:
-                return {
-                    "id": item_id,
-                    "type": "message",
-                    "sent_at": row["sent_at"] or "",
-                    "text": row["text"] or "",
-                    "topics": [t for t in row["topics"] if t],
-                    "related_links": [lk for lk in row["links"] if lk.get("url")],
-                }
-
-        links = session.run(
-            """
-            MATCH (l:Link)
-            OPTIONAL MATCH (l)-[:ABOUT]->(t:Topic)
-            RETURN l.url AS url, l.title AS title, l.summary AS summary,
-                   l.sent_at AS sent_at, collect(DISTINCT t.name) AS topics
-            """
-        ).data()
-        for row in links:
-            if _link_id(row["url"]) == item_id:
-                return {
-                    "id": item_id,
-                    "type": "link",
-                    "sent_at": row.get("sent_at") or "",
-                    "text": row.get("summary") or "",
-                    "url": row.get("url") or "",
-                    "title": row.get("title") or "",
-                    "topics": [t for t in row["topics"] if t],
-                }
-    raise HTTPException(status_code=404, detail=f"unknown item id: {item_id}")
+            """,
+            sent_at=payload.get("sent_at", ""), text=payload.get("text", ""),
+        ).single()
+        return {
+            "id": item_id,
+            "type": "message",
+            "sent_at": payload.get("sent_at", ""),
+            "text": payload.get("text") or "",
+            "topics": [t for t in (row["topics"] if row else []) if t],
+            "related_links": [lk for lk in (row["links"] if row else []) if lk.get("url")],
+        }
 
 
-def _topic_counts(session) -> dict:
-    """Topic name -> Messages + Links ABOUT it.
+def _topic_name_items(session) -> dict:
+    """{topic_name: {item_id, ...}}, Messages and Links ABOUT it.
 
     Two plain queries, not one combining them: an empty side dropping the
     other's rows is exactly the retrieval.py graph-enrich bug (Phase 1).
+    One full scan of the topic edges -- every endpoint below (listing,
+    browsing, neighbors, suggestions) folds spelling variants in Python
+    from this same map, with no further Neo4j calls.
     """
     message_rows = session.run(
-        "MATCH (m:Message)-[:ABOUT]->(t:Topic) RETURN t.name AS name, count(m) AS n"
+        "MATCH (m:Message)-[:ABOUT]->(t:Topic) "
+        "RETURN t.name AS name, m.sent_at AS sent_at, m.text AS text"
     ).data()
     link_rows = session.run(
-        "MATCH (l:Link)-[:ABOUT]->(t:Topic) RETURN t.name AS name, count(l) AS n"
+        "MATCH (l:Link)-[:ABOUT]->(t:Topic) RETURN t.name AS name, l.url AS url"
     ).data()
-    counts: dict = {}
-    for row in message_rows + link_rows:
-        counts[row["name"]] = counts.get(row["name"], 0) + row["n"]
-    return counts
+    by_name: dict = {}
+    for row in message_rows:
+        by_name.setdefault(row["name"], set()).add(_message_id(row["sent_at"], row["text"]))
+    for row in link_rows:
+        by_name.setdefault(row["name"], set()).add(_link_id(row["url"]))
+    return by_name
+
+
+def _topic_groups(by_name: dict) -> dict:
+    """``{topic_key: {"names": {original_name: {item_id,...}}, "items": {item_id,...}}}``."""
+    groups: dict = {}
+    for name, item_ids in by_name.items():
+        g = groups.setdefault(topic_key(name), {"names": {}, "items": set()})
+        g["names"][name] = item_ids
+        g["items"] |= item_ids
+    return groups
+
+
+def _canonical_name(names: dict) -> str:
+    """The spelling tagged on the most items; ties broken alphabetically."""
+    return min(names.keys(), key=lambda n: (-len(names[n]), n))
 
 
 @app.get("/topics")
 def list_topics():
-    """[{name, count}], count = Messages + Links ABOUT the topic, sorted desc."""
+    """[{name, count, variants}], one row per spelling-variant group (M1 §3
+    review fix), sorted by count (Messages + Links ABOUT any variant,
+    counted once per item) descending."""
     with app.state.store.driver.session() as session:
-        counts = _topic_counts(session)
-    topics = sorted(({"name": name, "count": n} for name, n in counts.items()),
-                    key=lambda t: (-t["count"], t["name"]))
+        groups = _topic_groups(_topic_name_items(session))
+    topics = [{"name": _canonical_name(g["names"]), "count": len(g["items"]),
+              "variants": sorted(g["names"])} for g in groups.values()]
+    topics.sort(key=lambda t: (-t["count"], t["name"]))
     return {"topics": topics}
 
 
-def _topic_items(session, name: str) -> list:
-    """Every message/link ABOUT ``name``, newest first, 300-char snippet."""
+def _items_for_topic_names(session, names: set) -> list:
+    """Every message/link ABOUT any of ``names``, deduped by id, newest first."""
+    names_list = list(names)
     message_rows = session.run(
-        "MATCH (m:Message)-[:ABOUT]->(:Topic {name: $name}) "
-        "RETURN m.sent_at AS sent_at, m.text AS text",
-        name=name,
+        "MATCH (m:Message)-[:ABOUT]->(t:Topic) WHERE t.name IN $names "
+        "RETURN DISTINCT m.sent_at AS sent_at, m.text AS text",
+        names=names_list,
     ).data()
     link_rows = session.run(
-        "MATCH (l:Link)-[:ABOUT]->(:Topic {name: $name}) "
-        "RETURN l.url AS url, l.title AS title, l.summary AS summary, l.sent_at AS sent_at",
-        name=name,
+        "MATCH (l:Link)-[:ABOUT]->(t:Topic) WHERE t.name IN $names "
+        "RETURN DISTINCT l.url AS url, l.title AS title, l.summary AS summary, l.sent_at AS sent_at",
+        names=names_list,
     ).data()
-    items = [
-        {"id": _message_id(row["sent_at"], row["text"]), "type": "message",
-         "sent_at": row["sent_at"] or "", "text": (row["text"] or "")[:300]}
-        for row in message_rows
-    ]
-    items += [
-        {"id": _link_id(row["url"]), "type": "link", "sent_at": row.get("sent_at") or "",
-         "text": (row.get("summary") or "")[:300], "url": row.get("url") or "",
-         "title": row.get("title") or ""}
-        for row in link_rows
-    ]
+    by_id: dict = {}
+    for row in message_rows:
+        item_id = _message_id(row["sent_at"], row["text"])
+        by_id[item_id] = {"id": item_id, "type": "message",
+                          "sent_at": row["sent_at"] or "", **_snippet(row["text"])}
+    for row in link_rows:
+        item_id = _link_id(row["url"])
+        by_id[item_id] = {"id": item_id, "type": "link", "sent_at": row.get("sent_at") or "",
+                          "url": row.get("url") or "", "title": row.get("title") or "",
+                          **_snippet(row.get("summary") or "")}
+    items = list(by_id.values())
     items.sort(key=lambda it: it["sent_at"], reverse=True)
     return items
 
 
-def _topic_neighbors(session, name: str) -> list:
-    """Top 5 topics co-occurring on the same items as ``name``, with counts."""
-    message_rows = session.run(
-        "MATCH (:Topic {name: $name})<-[:ABOUT]-(m:Message)-[:ABOUT]->(other:Topic) "
-        "WHERE other.name <> $name "
-        "RETURN other.name AS name, count(DISTINCT m) AS n",
-        name=name,
-    ).data()
-    link_rows = session.run(
-        "MATCH (:Topic {name: $name})<-[:ABOUT]-(l:Link)-[:ABOUT]->(other:Topic) "
-        "WHERE other.name <> $name "
-        "RETURN other.name AS name, count(DISTINCT l) AS n",
-        name=name,
-    ).data()
-    counts: dict = {}
-    for row in message_rows + link_rows:
-        counts[row["name"]] = counts.get(row["name"], 0) + row["n"]
-    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
-    return [{"name": n, "count": c} for n, c in ranked[:5]]
+def _topic_neighbors(groups: dict, key: str) -> list:
+    """Top 5 topic keys co-occurring on the same items as ``key``, with counts."""
+    this_items = groups[key]["items"]
+    scored = [(len(g["items"] & this_items), _canonical_name(g["names"]))
+             for other_key, g in groups.items()
+             if other_key != key and g["items"] & this_items]
+    scored.sort(key=lambda sc: (-sc[0], sc[1]))
+    return [{"name": name, "count": count} for count, name in scored[:5]]
 
 
-def _topic_suggestions(session, name: str) -> list:
-    """5 closest topic names by case-insensitive substring match, for a 404."""
-    rows = session.run("MATCH (t:Topic) RETURN t.name AS name").data()
-    needle = name.lower()
-    matches = [row["name"] for row in rows
-              if needle in row["name"].lower() or row["name"].lower() in needle]
-    matches.sort(key=lambda n: (abs(len(n) - len(name)), n))
-    return matches[:5]
+def _topic_suggestions(groups: dict, name: str) -> list:
+    """5 closest topic keys by substring match, for a 404 -- one canonical
+    name per matching group, compared on keys so plural/case/punctuation
+    variants of a near-miss still surface."""
+    needle = topic_key(name)
+    matches = [(key, _canonical_name(g["names"])) for key, g in groups.items()
+              if needle in key or key in needle]
+    matches.sort(key=lambda kc: (abs(len(kc[0]) - len(needle)), kc[1]))
+    return [canonical for _key, canonical in matches[:5]]
 
 
-@app.get("/topics/{name}")
+@app.get("/topics/{name:path}")
 def browse_topic(name: str, limit: int = Query(default=50, ge=1, le=500)):
-    """Every message/link ABOUT ``name``, newest first, plus total and neighbors."""
+    """Every message/link ABOUT any spelling variant of ``name``, newest
+    first, plus total and neighbors. ``:path`` so a slash in the topic
+    (e.g. "AI/ML") round-trips through the MCP's percent-encoding."""
+    key = topic_key(name)
     with app.state.store.driver.session() as session:
-        items = _topic_items(session, name)
-        if not items:
-            suggestions = _topic_suggestions(session, name)
+        groups = _topic_groups(_topic_name_items(session))
+        group = groups.get(key)
+        if group is None:
+            suggestions = _topic_suggestions(groups, name)
             detail = f"unknown topic: {name}"
             if suggestions:
                 detail += f". Did you mean: {', '.join(suggestions)}?"
             raise HTTPException(status_code=404, detail=detail)
-        neighbors = _topic_neighbors(session, name)
+        items = _items_for_topic_names(session, set(group["names"]))
+    neighbors = _topic_neighbors(groups, key)
     return {"topic": name, "total": len(items), "items": items[:limit],
             "neighbors": neighbors}
 

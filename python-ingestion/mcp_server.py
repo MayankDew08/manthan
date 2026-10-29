@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -88,6 +89,14 @@ def _log_call(tool: str, args: dict, result_count: Optional[int],
         logger.exception("failed to append to %s", LOG_PATH)
 
 
+def _snippet(text: str) -> dict:
+    """Cut to SNIPPET_CHARS, flagging the cut; a cut snippet ends with "…"."""
+    text = text or ""
+    if len(text) <= SNIPPET_CHARS:
+        return {"text": text, "truncated": False}
+    return {"text": text[:SNIPPET_CHARS - 1].rstrip() + "…", "truncated": True}
+
+
 def _unreachable_message() -> str:
     return (f"Manthan API is not reachable at {API_URL}. Ask the user to start it "
             "(docker compose up + the FastAPI app).")
@@ -136,14 +145,19 @@ def search(query: str) -> str:
     assert data is not None  # error is None, so _post returned a body
     results = (data.get("results") or [])[:5]
     confidence = data.get("confidence", "none")
-    items = [{
-        "id": r.get("id"),
-        "sent_at": r.get("sent_at", ""),
-        "text": (r.get("text") or "")[:SNIPPET_CHARS],
-        "url": r.get("url", ""),
-        "title": r.get("title", ""),
-        "related_links": r.get("related_links") or [],
-    } for r in results]
+    items = []
+    for r in results:
+        snippet = _snippet(r.get("text") or "")
+        items.append({
+            "id": r.get("id"),
+            "type": r.get("type", ""),
+            "sent_at": r.get("sent_at", ""),
+            "text": snippet["text"],
+            "truncated": snippet["truncated"],
+            "url": r.get("url", ""),
+            "title": r.get("title", ""),
+            "related_links": r.get("related_links") or [],
+        })
     _log_call("search", {"query": query}, len(items), confidence, None)
     return json.dumps({"results": items, "confidence": confidence}, ensure_ascii=False)
 
@@ -172,7 +186,8 @@ def list_topics() -> str:
 
 @mcp.tool(description=BROWSE_TOPIC_DESCRIPTION)
 def browse_topic(topic: str) -> str:
-    data, error = _get(f"/topics/{topic}")
+    encoded = urllib.parse.quote(topic, safe="")  # a "/" in the topic (e.g. "AI/ML")
+    data, error = _get(f"/topics/{encoded}")       # must not split the path
     if error:
         _log_call("browse_topic", {"topic": topic}, None, None, error)
         return error
