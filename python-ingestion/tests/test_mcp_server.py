@@ -81,9 +81,33 @@ def test_search_includes_id_date_url_title_related_links_and_confidence(tmp_path
     _use_transport(handler, monkeypatch)
     out = json.loads(mcp_server.search("anything"))
     item = out["results"][0]
-    for key in ("id", "sent_at", "text", "url", "title", "related_links"):
+    for key in ("id", "type", "sent_at", "text", "truncated", "url", "title",
+                "related_links"):
         assert key in item
     assert out["confidence"] == "strong"
+
+
+def test_search_truncated_flag_and_ellipsis_only_on_a_cut_snippet(tmp_path, monkeypatch):
+    _use_log(tmp_path, monkeypatch)
+
+    def handler(request):
+        return httpx.Response(200, json={"results": [
+            _search_result(id="m1", type="message", text="short"),
+            _search_result(id="l1", type="link", text="x" * 1000),
+        ], "confidence": "strong"})
+
+    _use_transport(handler, monkeypatch)
+    out = json.loads(mcp_server.search("anything"))
+    by_id = {r["id"]: r for r in out["results"]}
+
+    assert by_id["m1"]["type"] == "message"
+    assert by_id["m1"]["truncated"] is False
+    assert by_id["m1"]["text"] == "short"
+
+    assert by_id["l1"]["type"] == "link"
+    assert by_id["l1"]["truncated"] is True
+    assert by_id["l1"]["text"].endswith("…")
+    assert len(by_id["l1"]["text"]) == 300
 
 
 def test_search_unreachable_api_returns_instructional_text_not_a_raise(
@@ -150,6 +174,23 @@ def test_browse_topic_404_message_is_passed_through(tmp_path, monkeypatch):
     assert out == "unknown topic: xyz. Did you mean: rag?"
 
 
+def test_browse_topic_percent_encodes_a_slash_in_the_topic(tmp_path, monkeypatch):
+    """"AI/ML" must reach the API as one path segment (%2F), not be sent as
+    a literal "/" that FastAPI's :path route would otherwise still accept,
+    but a plain (non-:path) route would split into two segments."""
+    _use_log(tmp_path, monkeypatch)
+    seen_path = {}
+
+    def handler(request):
+        seen_path["raw"] = request.url.raw_path.decode()
+        return httpx.Response(200, json={"topic": "AI/ML", "total": 0,
+                                         "items": [], "neighbors": []})
+
+    _use_transport(handler, monkeypatch)
+    mcp_server.browse_topic("AI/ML")
+    assert seen_path["raw"] == "/topics/AI%2FML"
+
+
 # ---- call log ---------------------------------------------------------------
 
 def test_every_call_appends_one_json_line_to_the_call_log(tmp_path, monkeypatch):
@@ -197,3 +238,15 @@ def test_server_instructions_say_cite():
 
 def test_search_description_does_not_expose_kind_yet():
     assert "kind=" not in mcp_server.SEARCH_DESCRIPTION
+
+
+# ---- live (deselected unless --live) ---------------------------------------
+
+@pytest.mark.live
+def test_live_browse_topic_handles_a_slash_topic_end_to_end():
+    """mcp_server.browse_topic must percent-encode the slash so FastAPI's
+    /topics/{name:path} route receives "AI/ML" whole, against the real,
+    running Manthan API (a real topic in this corpus has a "/" in its name)."""
+    out = json.loads(mcp_server.browse_topic("AI/ML"))
+    assert out["topic"] == "AI/ML"
+    assert out["total"] > 0
