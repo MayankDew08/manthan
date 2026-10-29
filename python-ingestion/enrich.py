@@ -247,7 +247,7 @@ def process_candidates(candidates, *, force: bool = False, no_scrape: bool = Fal
             "sent_at": d.datetime_iso, "quality": g.quality,
             "original_text": g.original_text, "links": links,
             "link_intent": en["link_intent"], "entities": en["entities"],
-            "topics": en["topics"],
+            "topics": en["topics"], "category": g.category,
         })
         ctx = {"sent_at": d.datetime_iso,
                "original_text": g.original_text, "link_intent": en["link_intent"]}

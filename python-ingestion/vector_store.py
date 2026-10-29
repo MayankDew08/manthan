@@ -5,7 +5,7 @@ import uuid
 from typing import Callable, List, Optional
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, Batch 
+from qdrant_client.models import Distance, Filter, VectorParams, PointStruct, Batch
 
 from embedder import embed_batch, embed_text, embedding_dim
 
@@ -58,6 +58,7 @@ class VectorStore:
                 "topics": msg.get("topics") or [],
                 "entities": msg.get("entities") or [],
                 "type": "message",
+                "category": msg.get("category") or "",
             },
         )
         self.client.upsert(collection_name=self.collection, points=[point])
@@ -85,6 +86,7 @@ class VectorStore:
                 "entities": link.get("entities") or [],
                 "type": "link",
                 "source": link.get("source") or "scraped",
+                "category": "resource",
             },
         )
         self.client.upsert(collection_name=self.collection, points=[point])
@@ -101,11 +103,13 @@ class VectorStore:
                             points=Batch(ids=ids, vectors=vectors,
                                          payloads=payloads))
 
-    def search(self, query: str, limit: int = 10) -> list:
-        """Return raw Qdrant hits for an embedded query."""
+    def search(self, query: str, limit: int = 10,
+               query_filter: Optional[Filter] = None) -> list:
+        """Return raw Qdrant hits for an embedded query, optionally pre-pool filtered."""
         vector = self._embed(query)
         return self.client.search(
             collection_name=self.collection,
             query_vector=vector,
             limit=limit,
+            query_filter=query_filter,
         )

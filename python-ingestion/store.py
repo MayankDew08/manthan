@@ -59,9 +59,11 @@ class KnowledgeStore:
             """
             MERGE (m:Message {sent_at: $sent_at, text: $text})
             ON CREATE SET m.quality = $quality, m.link_intent = $link_intent,
-                m.entities = $entities, m.topics = $topics, m.trusted = $trusted
+                m.entities = $entities, m.topics = $topics, m.trusted = $trusted,
+                m.category = $category
             ON MATCH SET m.quality = $quality, m.link_intent = $link_intent,
-                m.entities = $entities, m.topics = $topics, m.trusted = $trusted
+                m.entities = $entities, m.topics = $topics, m.trusted = $trusted,
+                m.category = CASE WHEN $category = '' THEN m.category ELSE $category END
             WITH m
             FOREACH (name IN $entities |
                 MERGE (e:Entity {name: name})
@@ -72,7 +74,7 @@ class KnowledgeStore:
             WITH m
             UNWIND $links AS link
             MERGE (l:Link {url: link.url})
-            ON CREATE SET l.title = link.title
+            ON CREATE SET l.title = link.title, l.category = 'resource'
             MERGE (m)-[:CONTAINS]->(l)
             """,
             sent_at=sent_at,
@@ -82,6 +84,7 @@ class KnowledgeStore:
             entities=msg.get("entities") or [],
             topics=msg.get("topics") or [],
             trusted=bool(msg.get("trusted")),
+            category=msg.get("category") or "",
             links=[{"url": url, "title": _url_to_title(url)}
                    for url in msg.get("links") or []],
         )
@@ -110,7 +113,8 @@ class KnowledgeStore:
                 l.sent_at = $sent_at,
                 l.status = $status,
                 l.block_reason = $block_reason,
-                l.link_id = $link_id
+                l.link_id = $link_id,
+                l.category = 'resource'
             WITH l
             FOREACH (name IN $entities |
                 MERGE (e:Entity {name: name})

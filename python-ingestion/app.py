@@ -2,12 +2,13 @@
 
 import logging
 import os
+import re
 import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
@@ -19,9 +20,11 @@ import embedder
 import enhancer
 import ingest
 import pipeline
+import retrieval
+from evals.rerank import Reranker
+from evals.rerank import load_model as load_reranker_model
 from link_extract import parse_github_url
 from link_ingest import mark_resolved
-from search import search
 from store import KnowledgeStore, _url_to_title
 from vector_store import VectorStore
 
@@ -68,6 +71,7 @@ class SearchRequest(BaseModel):
     top_k: int = Field(default=10, ge=1, le=50)
     topics: Optional[List[str]] = None
     min_quality: Optional[int] = Field(default=None, ge=0, le=10)
+    kind: Literal["any", "introduction"] = "any"
 
 
 class IngestRequest(BaseModel):
@@ -100,10 +104,22 @@ class SkipRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Open long-lived Neo4j/Qdrant clients for the API process."""
+    """Open long-lived Neo4j/Qdrant clients for the API process, and warm
+    everything up before serving: load the cross-encoder, embed one dummy
+    query, and build the corpus cache. Without this, whichever request
+    happens to arrive first pays for all three, and concurrent first
+    requests would each load the model separately.
+    """
     app.state.store = KnowledgeStore()
     app.state.vs = VectorStore()
     app.state.vs.ensure_collection()
+    app.state.reranker = Reranker()
+    app.state.corpus = retrieval.Corpus()
+
+    load_reranker_model()
+    app.state.vs._embed("warm-up query")
+    app.state.corpus.refresh(app.state.vs)
+
     yield
     app.state.vs.close()
     app.state.store.close()
@@ -120,18 +136,22 @@ def health():
 
 @app.post("/search")
 def do_search(req: SearchRequest):
-    """Run hybrid search with optional topic and quality filters."""
+    """Run S2 (cosine + BM25 + RRF + re-rank) with optional topic/quality filters."""
     t0 = time.monotonic()
     try:
-        results = search(req.query, topics=req.topics, min_quality=req.min_quality,
-                         top_k=req.top_k, vs=app.state.vs, store=app.state.store)
+        out = retrieval.search_s2(req.query, top_k=req.top_k, kind=req.kind,
+                                  topics=req.topics, min_quality=req.min_quality,
+                                  vs=app.state.vs, reranker=app.state.reranker,
+                                  corpus=app.state.corpus, store=app.state.store)
     except Exception:  # pragma: no cover
-        SEARCH_REQUESTS.labels(engine="hybrid").inc()
+        SEARCH_REQUESTS.labels(engine="s2").inc()
         logger.exception("Search request failed")
         raise HTTPException(status_code=500, detail="search failed")
-    SEARCH_REQUESTS.labels(engine="hybrid").inc()
-    SEARCH_LATENCY.labels(engine="hybrid").observe(time.monotonic() - t0)
-    return {"query": req.query, "count": len(results), "results": results}
+    SEARCH_REQUESTS.labels(engine="s2").inc()
+    SEARCH_LATENCY.labels(engine="s2").observe(time.monotonic() - t0)
+    results = out["results"]
+    return {"query": req.query, "count": len(results), "results": results,
+            "confidence": out["confidence"], "top_score": out["top_score"]}
 
 
 def _run_ingest_job(job_id: str, chat_path: str, force: bool,
@@ -357,6 +377,229 @@ def list_messages(topic: Optional[str] = None,
     rows = _query_messages(topic=topic, entity=entity,
                            since=since, min_quality=min_quality, limit=limit)
     return {"count": len(rows), "messages": rows}
+
+
+def _message_id(sent_at: Optional[str], text: Optional[str]) -> str:
+    """M8: the id vector_store.upsert_message gives this message in Qdrant."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"msg-{sent_at or ''}-{text or ''}"))
+
+
+def _link_id(url: Optional[str]) -> str:
+    """M8: the id vector_store.upsert_link gives this link in Qdrant."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"link-{url or ''}"))
+
+
+_TOPIC_KEY_NON_ALNUM = re.compile(r"[^a-z0-9]+")
+
+
+def topic_key(name: str) -> str:
+    """Fold topic spelling variants to one key.
+
+    Topics are free-text from the grader, so one idea gets several spellings
+    ("agentic-workflows", "Agentic Workflow"). Case, punctuation/whitespace,
+    and a simple trailing plural don't matter; different words still do --
+    "Agentic AI" stays its own key, distinct from "agentic-workflows".
+    """
+    collapsed = _TOPIC_KEY_NON_ALNUM.sub(" ", (name or "").lower()).strip()
+    words = []
+    for word in collapsed.split(" "):
+        if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+            word = word[:-1]
+        words.append(word)
+    return " ".join(words)
+
+
+SNIPPET_CHARS = 300
+
+
+def _snippet(text: str) -> dict:
+    """Cut to SNIPPET_CHARS, flagging the cut; a cut snippet ends with "…"."""
+    text = text or ""
+    if len(text) <= SNIPPET_CHARS:
+        return {"text": text, "truncated": False}
+    return {"text": text[:SNIPPET_CHARS - 1].rstrip() + "…", "truncated": True}
+
+
+@app.get("/items/{item_id}")
+def get_item(item_id: str):
+    """One message or link's full record. The id IS the Qdrant point id
+    (M8): retrieve it directly instead of scanning Neo4j, then one Neo4j
+    read for its topics and (message: related_links; link: earliest
+    attributing sent_at).
+    """
+    try:
+        uuid.UUID(item_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"unknown item id: {item_id}")
+
+    points = app.state.vs.client.retrieve(
+        collection_name=app.state.vs.collection, ids=[item_id], with_payload=True)
+    if not points:
+        raise HTTPException(status_code=404, detail=f"unknown item id: {item_id}")
+    payload = points[0].payload or {}
+
+    with app.state.store.driver.session() as session:
+        if payload.get("type") == "link":
+            row = session.run(
+                """
+                MATCH (l:Link {url: $url})
+                OPTIONAL MATCH (l)-[:ABOUT]->(t:Topic)
+                OPTIONAL MATCH (m:Message)-[:CONTAINS]->(l)
+                RETURN collect(DISTINCT t.name) AS topics,
+                       min(m.sent_at) AS earliest_sent_at
+                """,
+                url=payload.get("url", ""),
+            ).single()
+            return {
+                "id": item_id,
+                "type": "link",
+                "sent_at": (row["earliest_sent_at"] if row else None) or "",
+                "text": payload.get("summary") or "",
+                "url": payload.get("url", ""),
+                "title": payload.get("title", ""),
+                "topics": [t for t in (row["topics"] if row else []) if t],
+            }
+
+        row = session.run(
+            """
+            MATCH (m:Message {sent_at: $sent_at, text: $text})
+            OPTIONAL MATCH (m)-[:ABOUT]->(t:Topic)
+            OPTIONAL MATCH (m)-[:CONTAINS]->(l:Link)
+            RETURN collect(DISTINCT t.name) AS topics,
+                   collect(DISTINCT {url: l.url, title: l.title}) AS links
+            """,
+            sent_at=payload.get("sent_at", ""), text=payload.get("text", ""),
+        ).single()
+        return {
+            "id": item_id,
+            "type": "message",
+            "sent_at": payload.get("sent_at", ""),
+            "text": payload.get("text") or "",
+            "topics": [t for t in (row["topics"] if row else []) if t],
+            "related_links": [lk for lk in (row["links"] if row else []) if lk.get("url")],
+        }
+
+
+def _topic_name_items(session) -> dict:
+    """{topic_name: {item_id, ...}}, Messages and Links ABOUT it.
+
+    Two plain queries, not one combining them: an empty side dropping the
+    other's rows is exactly the retrieval.py graph-enrich bug (Phase 1).
+    One full scan of the topic edges -- every endpoint below (listing,
+    browsing, neighbors, suggestions) folds spelling variants in Python
+    from this same map, with no further Neo4j calls.
+    """
+    message_rows = session.run(
+        "MATCH (m:Message)-[:ABOUT]->(t:Topic) "
+        "RETURN t.name AS name, m.sent_at AS sent_at, m.text AS text"
+    ).data()
+    link_rows = session.run(
+        "MATCH (l:Link)-[:ABOUT]->(t:Topic) RETURN t.name AS name, l.url AS url"
+    ).data()
+    by_name: dict = {}
+    for row in message_rows:
+        by_name.setdefault(row["name"], set()).add(_message_id(row["sent_at"], row["text"]))
+    for row in link_rows:
+        by_name.setdefault(row["name"], set()).add(_link_id(row["url"]))
+    return by_name
+
+
+def _topic_groups(by_name: dict) -> dict:
+    """``{topic_key: {"names": {original_name: {item_id,...}}, "items": {item_id,...}}}``."""
+    groups: dict = {}
+    for name, item_ids in by_name.items():
+        g = groups.setdefault(topic_key(name), {"names": {}, "items": set()})
+        g["names"][name] = item_ids
+        g["items"] |= item_ids
+    return groups
+
+
+def _canonical_name(names: dict) -> str:
+    """The spelling tagged on the most items; ties broken alphabetically."""
+    return min(names.keys(), key=lambda n: (-len(names[n]), n))
+
+
+@app.get("/topics")
+def list_topics():
+    """[{name, count, variants}], one row per spelling-variant group (M1 §3
+    review fix), sorted by count (Messages + Links ABOUT any variant,
+    counted once per item) descending."""
+    with app.state.store.driver.session() as session:
+        groups = _topic_groups(_topic_name_items(session))
+    topics = [{"name": _canonical_name(g["names"]), "count": len(g["items"]),
+              "variants": sorted(g["names"])} for g in groups.values()]
+    topics.sort(key=lambda t: (-t["count"], t["name"]))
+    return {"topics": topics}
+
+
+def _items_for_topic_names(session, names: set) -> list:
+    """Every message/link ABOUT any of ``names``, deduped by id, newest first."""
+    names_list = list(names)
+    message_rows = session.run(
+        "MATCH (m:Message)-[:ABOUT]->(t:Topic) WHERE t.name IN $names "
+        "RETURN DISTINCT m.sent_at AS sent_at, m.text AS text",
+        names=names_list,
+    ).data()
+    link_rows = session.run(
+        "MATCH (l:Link)-[:ABOUT]->(t:Topic) WHERE t.name IN $names "
+        "RETURN DISTINCT l.url AS url, l.title AS title, l.summary AS summary, l.sent_at AS sent_at",
+        names=names_list,
+    ).data()
+    by_id: dict = {}
+    for row in message_rows:
+        item_id = _message_id(row["sent_at"], row["text"])
+        by_id[item_id] = {"id": item_id, "type": "message",
+                          "sent_at": row["sent_at"] or "", **_snippet(row["text"])}
+    for row in link_rows:
+        item_id = _link_id(row["url"])
+        by_id[item_id] = {"id": item_id, "type": "link", "sent_at": row.get("sent_at") or "",
+                          "url": row.get("url") or "", "title": row.get("title") or "",
+                          **_snippet(row.get("summary") or "")}
+    items = list(by_id.values())
+    items.sort(key=lambda it: it["sent_at"], reverse=True)
+    return items
+
+
+def _topic_neighbors(groups: dict, key: str) -> list:
+    """Top 5 topic keys co-occurring on the same items as ``key``, with counts."""
+    this_items = groups[key]["items"]
+    scored = [(len(g["items"] & this_items), _canonical_name(g["names"]))
+             for other_key, g in groups.items()
+             if other_key != key and g["items"] & this_items]
+    scored.sort(key=lambda sc: (-sc[0], sc[1]))
+    return [{"name": name, "count": count} for count, name in scored[:5]]
+
+
+def _topic_suggestions(groups: dict, name: str) -> list:
+    """5 closest topic keys by substring match, for a 404 -- one canonical
+    name per matching group, compared on keys so plural/case/punctuation
+    variants of a near-miss still surface."""
+    needle = topic_key(name)
+    matches = [(key, _canonical_name(g["names"])) for key, g in groups.items()
+              if needle in key or key in needle]
+    matches.sort(key=lambda kc: (abs(len(kc[0]) - len(needle)), kc[1]))
+    return [canonical for _key, canonical in matches[:5]]
+
+
+@app.get("/topics/{name:path}")
+def browse_topic(name: str, limit: int = Query(default=50, ge=1, le=500)):
+    """Every message/link ABOUT any spelling variant of ``name``, newest
+    first, plus total and neighbors. ``:path`` so a slash in the topic
+    (e.g. "AI/ML") round-trips through the MCP's percent-encoding."""
+    key = topic_key(name)
+    with app.state.store.driver.session() as session:
+        groups = _topic_groups(_topic_name_items(session))
+        group = groups.get(key)
+        if group is None:
+            suggestions = _topic_suggestions(groups, name)
+            detail = f"unknown topic: {name}"
+            if suggestions:
+                detail += f". Did you mean: {', '.join(suggestions)}?"
+            raise HTTPException(status_code=404, detail=detail)
+        items = _items_for_topic_names(session, set(group["names"]))
+    neighbors = _topic_neighbors(groups, key)
+    return {"topic": name, "total": len(items), "items": items[:limit],
+            "neighbors": neighbors}
 
 
 @app.get("/metrics")
