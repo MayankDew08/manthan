@@ -92,28 +92,39 @@ class FakeVectorStore:
 
 
 class FakeStore:
-    """Enough of ``store.KnowledgeStore`` for ``_graph_enrich``: one read-only
-    query over an in-memory CONTAINS edge list. ``query_count`` lets tests
-    assert the whole top-k batch is enriched in a single round trip.
+    """Enough of ``store.KnowledgeStore`` for ``_graph_enrich``: two
+    independent read-only queries over an in-memory CONTAINS edge list.
+
+    ``query_log`` records which query actually ran (``"message_links"`` /
+    ``"link_attribution"``), so tests can assert the empty-input side is
+    skipped rather than issued as a no-op round trip.
     """
 
     def __init__(self, contains=()):
         self._contains = list(contains)  # [{"sent_at", "text", "url", "title"}]
-        self.query_count = 0
+        self.query_log: list = []
         self.driver = SimpleNamespace(session=lambda: _FakeSession(self))
 
-    def _answer(self, messages, urls):
-        self.query_count += 1
-        message_links = [
-            dict(c) for c in self._contains
-            if any(c["sent_at"] == m["sent_at"] and c["text"] == m["text"] for m in messages)
-        ]
-        link_attribution = [
-            {"url": url, "sent_at": min(
-                (c["sent_at"] for c in self._contains if c["url"] == url), default=None)}
-            for url in urls
-        ]
-        return {"message_links": message_links, "link_attribution": link_attribution}
+    @property
+    def query_count(self) -> int:
+        return len(self.query_log)
+
+    def run(self, messages=None, urls=None):
+        if messages is not None:
+            self.query_log.append("message_links")
+            return [
+                dict(c) for c in self._contains
+                if any(c["sent_at"] == m["sent_at"] and c["text"] == m["text"]
+                       for m in messages)
+            ]
+        if urls is not None:
+            self.query_log.append("link_attribution")
+            return [
+                {"link_url": url, "earliest_sent_at": min(
+                    (c["sent_at"] for c in self._contains if c["url"] == url), default=None)}
+                for url in urls
+            ]
+        raise AssertionError("FakeStore.run needs messages= or urls=")
 
 
 class _FakeSession:
@@ -127,8 +138,8 @@ class _FakeSession:
         return False
 
     def run(self, query, **params):
-        record = self._store._answer(params.get("messages", []), params.get("urls", []))
-        return SimpleNamespace(single=lambda: record)
+        rows = self._store.run(**params)
+        return SimpleNamespace(data=lambda: rows)
 
 
 def _store(contains=()):
@@ -303,9 +314,14 @@ def test_snippet_chars_constant_is_still_exported_for_phase_2():
     assert retrieval.SNIPPET_CHARS == 300
 
 
-# ---- graph enrichment (item 1): related_links / link sent_at, one query ---------
+# ---- graph enrichment (item 1): related_links / link sent_at -------------------
+#
+# Two independent queries, not one combined pipeline (regression: a single
+# query built from two CALL subqueries drops ALL rows, including the
+# message side, whenever the url side's input is empty -- see the mixed,
+# messages-only and links-only cases below).
 
-def test_graph_enrichment_fills_related_links_and_link_sent_at_in_one_query():
+def test_graph_enrichment_mixed_batch_runs_both_queries():
     docs = [_message("m1", "message one"), _link("l1", "link summary", url="u")]
     vs = FakeVectorStore(docs, cosine_order=["m1", "l1"])
     reranker = _reranker({"m1": 3.0, "l1": 2.0})
@@ -323,7 +339,42 @@ def test_graph_enrichment_fills_related_links_and_link_sent_at_in_one_query():
     by_id = {r["id"]: r for r in out["results"]}
     assert by_id["m1"]["related_links"] == [{"url": "other-url", "title": "Other"}]
     assert by_id["l1"]["sent_at"] == "2025-12-31T00:00:00"  # earliest of two edges to "u"
-    assert store.query_count == 1  # one round trip for the whole top-k batch
+    assert store.query_log == ["message_links", "link_attribution"]
+
+
+def test_graph_enrichment_messages_only_batch_still_fills_related_links():
+    """Regression: no link results in the top-k must not blank out the
+    message side too (the bug: an empty $urls made the whole combined query
+    return zero rows, silently dropping every message's related_links)."""
+    docs = [_message("m1", "message one")]
+    vs = FakeVectorStore(docs, cosine_order=["m1"])
+    reranker = _reranker({"m1": 3.0})
+    store = _store(contains=[
+        {"sent_at": "2026-01-01T00:00:00", "text": "message one",
+         "url": "other-url", "title": "Other"},
+    ])
+
+    out = retrieval.search_s2("q", vs=vs, reranker=reranker, store=store)
+
+    assert out["results"][0]["related_links"] == [{"url": "other-url", "title": "Other"}]
+    assert store.query_log == ["message_links"]  # link_attribution skipped: no urls
+
+
+def test_graph_enrichment_links_only_batch_still_fills_sent_at():
+    """Regression: no message results in the top-k must not blank out the
+    link side (empty $messages making the combined query return zero rows)."""
+    docs = [_link("l1", "link summary", url="u")]
+    vs = FakeVectorStore(docs, cosine_order=["l1"])
+    reranker = _reranker({"l1": 1.0})
+    store = _store(contains=[
+        {"sent_at": "2025-12-31T00:00:00", "text": "an earlier message",
+         "url": "u", "title": "T"},
+    ])
+
+    out = retrieval.search_s2("q", vs=vs, reranker=reranker, store=store)
+
+    assert out["results"][0]["sent_at"] == "2025-12-31T00:00:00"
+    assert store.query_log == ["link_attribution"]  # message_links skipped: no messages
 
 
 def test_graph_enrichment_leaves_message_without_links_empty():
@@ -332,6 +383,35 @@ def test_graph_enrichment_leaves_message_without_links_empty():
     reranker = _reranker({"m1": 1.0})
     out = retrieval.search_s2("q", vs=vs, reranker=reranker, store=_store())
     assert out["results"][0]["related_links"] == []
+
+
+# ---- graph enrichment, live (deselected unless --live) --------------------------
+
+@pytest.mark.live
+def test_live_graph_enrich_fills_related_links_for_messages_only_batch():
+    """Same regression as the offline messages-only test, against the real,
+    read-only Neo4j: a messages-only batch (no link results in the top-k)
+    must still come back with at least one non-empty related_links.
+    """
+    from evals import common, live_guard
+
+    common.load_env()
+    store = live_guard.read_only_store()
+    try:
+        rows = live_guard.neo4j_read(
+            store.driver,
+            "MATCH (m:Message)-[:CONTAINS]->(:Link) "
+            "RETURN m.sent_at AS sent_at, m.text AS text LIMIT 1")
+        assert rows, "fixture assumption: at least one Message CONTAINS a Link"
+        sent_at, text = rows[0]["sent_at"], rows[0]["text"]
+
+        results = [{"type": "message", "sent_at": sent_at, "text": text,
+                    "related_links": []}]
+        retrieval._graph_enrich(store, results)
+
+        assert results[0]["related_links"], "messages-only batch lost its related_links"
+    finally:
+        store.close()
 
 
 # ---- Corpus: refresh-on-size-change, atomic snapshot swap (item 3) ---------------
