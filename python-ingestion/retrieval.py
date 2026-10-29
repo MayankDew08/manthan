@@ -8,7 +8,9 @@ so this module and the offline eval can never score the ranking differently.
 from dataclasses import dataclass
 from typing import Optional
 
-from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue, Range
+from qdrant_client.models import (
+    FieldCondition, Filter, IsEmptyCondition, MatchAny, MatchValue, PayloadField, Range,
+)
 
 from evals.bm25 import BM25
 from evals.common import embedded_text
@@ -21,6 +23,14 @@ CONFIDENCE_STRONG_MIN = 2.0
 # Phase 2's MCP layer, which truncates for the model's context budget.
 SNIPPET_CHARS = 300
 
+# Phase 3's backfill script only ``set_payload``s category onto existing
+# points -- the collection's point count never changes, so Corpus.refresh
+# can't tell a backfill happened from client.count() alone. Also track how
+# many points carry a "category" payload; a change there forces a rebuild
+# too, so kind="introduction" picks up a backfill on the very next request
+# instead of needing a restart.
+_HAS_CATEGORY_FILTER = Filter(must_not=[IsEmptyCondition(is_empty=PayloadField(key="category"))])
+
 
 @dataclass(frozen=True)
 class _Snapshot:
@@ -30,13 +40,15 @@ class _Snapshot:
     together -- it sees the old snapshot whole, or the new one whole."""
 
     size: int
+    category_count: int
     ids: list[str]
     payloads: dict[str, dict]
     text_by_id: dict[str, str]
     bm25: BM25
 
 
-_EMPTY = _Snapshot(size=-1, ids=[], payloads={}, text_by_id={}, bm25=BM25([]))
+_EMPTY = _Snapshot(size=-1, category_count=-1, ids=[], payloads={}, text_by_id={},
+                   bm25=BM25([]))
 
 
 class Corpus:
@@ -72,11 +84,16 @@ class Corpus:
         """Tests substitute a deterministic fake ranker. Still one swap: the
         rest of the snapshot (ids/payloads/text_by_id/size) is unchanged."""
         s = self._snapshot
-        self._snapshot = _Snapshot(s.size, s.ids, s.payloads, s.text_by_id, value)
+        self._snapshot = _Snapshot(s.size, s.category_count, s.ids, s.payloads,
+                                   s.text_by_id, value)
 
     def refresh(self, vs) -> None:
         live_size = vs.client.count(collection_name=vs.collection, exact=True).count
-        if live_size == self._snapshot.size:
+        live_category_count = vs.client.count(
+            collection_name=vs.collection, exact=True,
+            count_filter=_HAS_CATEGORY_FILTER).count
+        current = self._snapshot
+        if live_size == current.size and live_category_count == current.category_count:
             return
         ids: list[str] = []
         payloads: dict[str, dict] = {}
@@ -95,7 +112,8 @@ class Corpus:
             if offset is None:
                 break
         bm25 = BM25([text_by_id[i] for i in ids])
-        self._snapshot = _Snapshot(live_size, ids, payloads, text_by_id, bm25)
+        self._snapshot = _Snapshot(live_size, live_category_count, ids, payloads,
+                                   text_by_id, bm25)
 
 
 def _passes(payload: dict, topics: Optional[list], min_quality: Optional[int],

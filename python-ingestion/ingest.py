@@ -127,6 +127,7 @@ def build_records_node(state: IngestState) -> dict:
             "entities": en["entities"],
             "topics": en["topics"],
             "trusted": trusted,
+            "category": g.category,
         }
         enriched.append(record)
         by_key[key] = record

@@ -58,6 +58,7 @@ class VectorStore:
                 "topics": msg.get("topics") or [],
                 "entities": msg.get("entities") or [],
                 "type": "message",
+                "category": msg.get("category") or "",
             },
         )
         self.client.upsert(collection_name=self.collection, points=[point])
@@ -85,6 +86,7 @@ class VectorStore:
                 "entities": link.get("entities") or [],
                 "type": "link",
                 "source": link.get("source") or "scraped",
+                "category": "resource",
             },
         )
         self.client.upsert(collection_name=self.collection, points=[point])

@@ -13,7 +13,7 @@ import sys
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -37,9 +37,9 @@ INSTRUCTIONS = (
     "something as coming from the user's groups unless a tool returned it."
 )
 
-# Verbatim from docs/mcp-server-spec.md section 3 (Q6/Q7), minus the
-# kind="introduction" sentence: kind isn't exposed until Phase 3, and that
-# sentence is added together with the parameter then.
+# Verbatim from docs/mcp-server-spec.md section 3 (Q6/Q7). Phase 2 omitted
+# the kind="introduction" sentence (kind wasn't exposed yet); Phase 3 adds
+# it back here, together with the parameter.
 SEARCH_DESCRIPTION = (
     "Searches the user's saved knowledge from their tech WhatsApp groups: messages\n"
     "and shared links (articles, repos, videos) where members discussed tools,\n"
@@ -48,7 +48,9 @@ SEARCH_DESCRIPTION = (
     "or asks what their groups said or shared about something; skip it for general\n"
     "knowledge or routine coding steps that don't need the community's view.\n"
     "Pass a natural-language question (e.g. \"problems people had with Qdrant\n"
-    "filters\"), not single keywords.\n"
+    "filters\"), not single keywords. "
+    "Set kind=\"introduction\" only when the user wants people to connect with: "
+    "it searches members' self-introductions.\n"
     "Returns up to 5 results, each with an id, date, short snippet, link title/URL\n"
     "if any, plus an overall confidence: strong, weak, or none. On weak, check the\n"
     "snippets really answer the question before using them.\n"
@@ -137,10 +139,10 @@ def _post(path: str, json_body: dict) -> tuple[Optional[dict], Optional[str]]:
 
 
 @mcp.tool(description=SEARCH_DESCRIPTION)
-def search(query: str) -> str:
-    data, error = _post("/search", {"query": query, "top_k": 5})
+def search(query: str, kind: Literal["any", "introduction"] = "any") -> str:
+    data, error = _post("/search", {"query": query, "top_k": 5, "kind": kind})
     if error:
-        _log_call("search", {"query": query}, None, None, error)
+        _log_call("search", {"query": query, "kind": kind}, None, None, error)
         return error
     assert data is not None  # error is None, so _post returned a body
     results = (data.get("results") or [])[:5]

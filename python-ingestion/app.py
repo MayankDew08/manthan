@@ -8,7 +8,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
@@ -70,6 +70,7 @@ class SearchRequest(BaseModel):
     top_k: int = Field(default=10, ge=1, le=50)
     topics: Optional[List[str]] = None
     min_quality: Optional[int] = Field(default=None, ge=0, le=10)
+    kind: Literal["any", "introduction"] = "any"
 
 
 class IngestRequest(BaseModel):
@@ -127,10 +128,10 @@ def do_search(req: SearchRequest):
     """Run S2 (cosine + BM25 + RRF + re-rank) with optional topic/quality filters."""
     t0 = time.monotonic()
     try:
-        out = retrieval.search_s2(req.query, top_k=req.top_k, topics=req.topics,
-                                  min_quality=req.min_quality, vs=app.state.vs,
-                                  reranker=app.state.reranker, corpus=app.state.corpus,
-                                  store=app.state.store)
+        out = retrieval.search_s2(req.query, top_k=req.top_k, kind=req.kind,
+                                  topics=req.topics, min_quality=req.min_quality,
+                                  vs=app.state.vs, reranker=app.state.reranker,
+                                  corpus=app.state.corpus, store=app.state.store)
     except Exception:  # pragma: no cover
         SEARCH_REQUESTS.labels(engine="s2").inc()
         logger.exception("Search request failed")
