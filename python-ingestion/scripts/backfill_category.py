@@ -3,12 +3,32 @@
 only Qdrant ``set_payload`` and Neo4j ``SET``, so vectors and ids never
 change (``evals.parity_check`` still passes after --apply).
 
+Neo4j and Qdrant are planned **independently**: a matched row may need
+Neo4j's category SET, Qdrant's set_payload, both, or neither, and the two
+are tracked separately rather than through one combined "to_update" list.
+This matters because the two stores can drift out of step with each other
+-- a prior run (or a crash partway through one) can leave Neo4j updated
+while Qdrant isn't, or vice versa -- and a re-run must still fix whichever
+store is actually behind, not skip it because the *other* store already
+matches.
+
+It matters doubly for Qdrant specifically: not every graded message/link
+is necessarily a live Qdrant point (e.g. it scored below the vectoring
+threshold). Qdrant's own ``set_payload`` raises on ANY missing id in a
+batch, so an id list built without checking existence first can fail the
+whole batch over one bad id. This script retrieves every candidate id from
+Qdrant first (batches of 100) and only ever set_payloads ids confirmed to
+exist; a missing id is reported as "not_in_qdrant" and skipped, never an
+error.
+
 What it does:
   Neo4j  : SET m.category on existing :Message nodes (never MERGE/CREATE a
-           node). Also SET l.category = "resource" on every :Link missing it.
-  Qdrant : set_payload({"category": ...}) on existing points, grouped by
-           category value to minimize calls. Creates a keyword payload
-           index on "category".
+           node); an empty/missing category never overwrites an existing
+           one (store.py's ON MATCH guards this with a CASE). Also SET
+           l.category = "resource" on every :Link missing it.
+  Qdrant : set_payload({"category": ...}) on points confirmed to exist,
+           grouped by category value to minimize calls. Creates a keyword
+           payload index on "category".
 
 Source: graded_messages.json (quality/category/original_text -- no
 sent_at). Each grade is paired with the live :Message that shares its
@@ -84,7 +104,8 @@ def align_grades_to_messages(grades: list, messages: list) -> tuple:
     picking any specific pairing then would be a guess.
 
     Returns ``(matched, unmatched)``; a matched row is
-    ``{"sent_at", "text", "old_category", "new_category"}``.
+    ``{"sent_at", "text", "old_category", "new_category"}`` -- Neo4j's
+    current category and the grade's category, independent of Qdrant.
     """
     messages_by_text: dict = defaultdict(list)
     for m in messages:
@@ -111,49 +132,99 @@ def align_grades_to_messages(grades: list, messages: list) -> tuple:
     return matched, unmatched
 
 
-def plan(grades: list, driver) -> dict:
+def qdrant_payload_categories(client, collection: str, ids: list) -> dict:
+    """``{id: category_or_None}`` for every id that actually exists in
+    Qdrant, read in batches of 100. An id simply absent from the result
+    means it isn't a live point -- retrieve never raises for that, unlike
+    set_payload."""
+    found: dict = {}
+    for i in range(0, len(ids), 100):
+        batch = ids[i:i + 100]
+        for point in client.retrieve(collection_name=collection, ids=batch, with_payload=True):
+            found[str(point.id)] = (point.payload or {}).get("category")
+    return found
+
+
+def _split_by_qdrant_state(rows: list, ids: list, intended_categories: list,
+                           qdrant_categories: dict) -> tuple:
+    """Three-way split of ``rows`` (messages or links) against Qdrant's
+    actual payload state: to_update (exists, category differs),
+    already_set (exists, category matches), not_in_qdrant (id absent)."""
+    to_update, already_set, not_in_qdrant = [], [], []
+    for row, point_id, intended in zip(rows, ids, intended_categories):
+        if point_id not in qdrant_categories:
+            not_in_qdrant.append(row)
+        elif qdrant_categories[point_id] != intended:
+            to_update.append(row)
+        else:
+            already_set.append(row)
+    return to_update, already_set, not_in_qdrant
+
+
+def plan(grades: list, driver, qdrant_client, collection: str) -> dict:
     """Read-only: everything --dry-run and --apply both need to decide what
-    to change, without writing to Qdrant or Neo4j."""
+    to change, without writing to Qdrant or Neo4j. Neo4j's and Qdrant's
+    plans are independent of each other (see the module docstring)."""
     matched, unmatched = align_grades_to_messages(grades, live_messages(driver))
-    to_update = [row for row in matched if row["old_category"] != row["new_category"]]
-    already_set = [row for row in matched if row["old_category"] == row["new_category"]]
+    neo4j_to_update = [row for row in matched if row["old_category"] != row["new_category"]]
+    neo4j_already_set = [row for row in matched if row["old_category"] == row["new_category"]]
 
     links = live_links(driver)
-    links_to_update = [lk for lk in links if lk.get("category") != LINK_CATEGORY]
-    links_already_set = [lk for lk in links if lk.get("category") == LINK_CATEGORY]
+    links_neo4j_to_update = [lk for lk in links if lk.get("category") != LINK_CATEGORY]
+    links_neo4j_already_set = [lk for lk in links if lk.get("category") == LINK_CATEGORY]
+
+    message_ids = [message_id(row["sent_at"], row["text"]) for row in matched]
+    msg_categories = qdrant_payload_categories(qdrant_client, collection, message_ids)
+    qdrant_msg_to_update, qdrant_msg_already_set, qdrant_msg_not_in_qdrant = \
+        _split_by_qdrant_state(matched, message_ids,
+                               [row["new_category"] for row in matched], msg_categories)
+
+    link_ids = [link_id(lk["url"]) for lk in links]
+    link_categories = qdrant_payload_categories(qdrant_client, collection, link_ids)
+    qdrant_link_to_update, qdrant_link_already_set, qdrant_link_not_in_qdrant = \
+        _split_by_qdrant_state(links, link_ids, [LINK_CATEGORY] * len(links), link_categories)
 
     return {
         "matched": matched, "unmatched": unmatched,
-        "to_update": to_update, "already_set": already_set,
-        "links_to_update": links_to_update, "links_already_set": links_already_set,
+        "neo4j_to_update": neo4j_to_update, "neo4j_already_set": neo4j_already_set,
+        "links_neo4j_to_update": links_neo4j_to_update,
+        "links_neo4j_already_set": links_neo4j_already_set,
+        "qdrant_msg_to_update": qdrant_msg_to_update,
+        "qdrant_msg_already_set": qdrant_msg_already_set,
+        "qdrant_msg_not_in_qdrant": qdrant_msg_not_in_qdrant,
+        "qdrant_link_to_update": qdrant_link_to_update,
+        "qdrant_link_already_set": qdrant_link_already_set,
+        "qdrant_link_not_in_qdrant": qdrant_link_not_in_qdrant,
     }
 
 
-def apply_messages(driver, to_update: list) -> None:
+def apply_messages(driver, neo4j_to_update: list) -> None:
     """``SET m.category`` on an existing node -- never ``MERGE``/creates one."""
     with driver.session() as session:
-        for row in to_update:
+        for row in neo4j_to_update:
             session.run(
                 "MATCH (m:Message {sent_at: $sent_at, text: $text}) "
                 "SET m.category = $category",
                 sent_at=row["sent_at"], text=row["text"], category=row["new_category"])
 
 
-def apply_links_neo4j(driver, links_to_update: list) -> None:
+def apply_links_neo4j(driver, links_neo4j_to_update: list) -> None:
     with driver.session() as session:
-        for link in links_to_update:
+        for link in links_neo4j_to_update:
             session.run(
                 "MATCH (l:Link {url: $url}) SET l.category = $category",
                 url=link["url"], category=LINK_CATEGORY)
 
 
-def apply_qdrant(client, collection: str, to_update: list, links_to_update: list) -> None:
-    """``set_payload`` only -- never ``upsert``, no re-embedding, no id
-    change. Grouped by category value to minimize calls."""
+def apply_qdrant(client, collection: str, qdrant_msg_to_update: list,
+                 qdrant_link_to_update: list) -> None:
+    """``set_payload`` only, on ids ``plan`` already confirmed exist --
+    never ``upsert``, no re-embedding, no id change. Grouped by category
+    value to minimize calls."""
     ids_by_category: dict = defaultdict(list)
-    for row in to_update:
+    for row in qdrant_msg_to_update:
         ids_by_category[row["new_category"]].append(message_id(row["sent_at"], row["text"]))
-    for link in links_to_update:
+    for link in qdrant_link_to_update:
         ids_by_category[LINK_CATEGORY].append(link_id(link["url"]))
     for category, ids in ids_by_category.items():
         if ids:
@@ -165,6 +236,23 @@ def ensure_category_index(client, collection: str) -> None:
     from qdrant_client.models import PayloadSchemaType
     client.create_payload_index(collection_name=collection, field_name="category",
                                 field_schema=PayloadSchemaType.KEYWORD)
+
+
+def _print_plan(result: dict) -> None:
+    print(f"neo4j messages: to_update={len(result['neo4j_to_update'])} "
+          f"already_set={len(result['neo4j_already_set'])}")
+    print(f"neo4j links:    to_update={len(result['links_neo4j_to_update'])} "
+          f"already_set={len(result['links_neo4j_already_set'])}")
+    print(f"qdrant messages: to_update={len(result['qdrant_msg_to_update'])} "
+          f"already_set={len(result['qdrant_msg_already_set'])} "
+          f"not_in_qdrant={len(result['qdrant_msg_not_in_qdrant'])}")
+    print(f"qdrant links:    to_update={len(result['qdrant_link_to_update'])} "
+          f"already_set={len(result['qdrant_link_already_set'])} "
+          f"not_in_qdrant={len(result['qdrant_link_not_in_qdrant'])}")
+    print(f"matched={len(result['matched'])} unmatched={len(result['unmatched'])}")
+    if result["unmatched"]:
+        sample = [row["original_text"][:60] for row in result["unmatched"][:5]]
+        print(f"unmatched sample (up to 5 of {len(result['unmatched'])}): {sample}")
 
 
 def main(argv=None) -> int:
@@ -190,25 +278,19 @@ def main(argv=None) -> int:
     )
     try:
         grades = load_list(args.graded_file)
-        result = plan(grades, store.driver)
-
-        print(f"matched={len(result['matched'])} unmatched={len(result['unmatched'])} "
-              f"already_set={len(result['already_set'])} "
-              f"to_update={len(result['to_update'])}")
-        print(f"links: already_set={len(result['links_already_set'])} "
-              f"to_update={len(result['links_to_update'])}")
-        if result["unmatched"]:
-            sample = [row["original_text"][:60] for row in result["unmatched"][:5]]
-            print(f"unmatched sample (up to 5 of {len(result['unmatched'])}): {sample}")
+        result = plan(grades, store.driver, client, args.collection)
+        _print_plan(result)
 
         if args.apply:
-            apply_messages(store.driver, result["to_update"])
-            apply_links_neo4j(store.driver, result["links_to_update"])
-            apply_qdrant(client, args.collection, result["to_update"],
-                        result["links_to_update"])
+            apply_messages(store.driver, result["neo4j_to_update"])
+            apply_links_neo4j(store.driver, result["links_neo4j_to_update"])
+            apply_qdrant(client, args.collection, result["qdrant_msg_to_update"],
+                        result["qdrant_link_to_update"])
             ensure_category_index(client, args.collection)
-            print(f"applied: {len(result['to_update'])} message(s), "
-                  f"{len(result['links_to_update'])} link(s)")
+            print(f"applied: neo4j {len(result['neo4j_to_update'])} message(s) + "
+                  f"{len(result['links_neo4j_to_update'])} link(s); "
+                  f"qdrant {len(result['qdrant_msg_to_update'])} message(s) + "
+                  f"{len(result['qdrant_link_to_update'])} link(s)")
             print("restart the API or wait for the next request")
         else:
             print("--dry-run: no writes made")

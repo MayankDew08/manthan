@@ -63,7 +63,7 @@ class KnowledgeStore:
                 m.category = $category
             ON MATCH SET m.quality = $quality, m.link_intent = $link_intent,
                 m.entities = $entities, m.topics = $topics, m.trusted = $trusted,
-                m.category = $category
+                m.category = CASE WHEN $category = '' THEN m.category ELSE $category END
             WITH m
             FOREACH (name IN $entities |
                 MERGE (e:Entity {name: name})
