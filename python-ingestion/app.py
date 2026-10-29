@@ -415,6 +415,11 @@ def get_item(item_id: str):
     read for its topics and (message: related_links; link: earliest
     attributing sent_at).
     """
+    try:
+        uuid.UUID(item_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"unknown item id: {item_id}")
+
     points = app.state.vs.client.retrieve(
         collection_name=app.state.vs.collection, ids=[item_id], with_payload=True)
     if not points:
