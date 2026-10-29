@@ -22,7 +22,7 @@ logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 logger = logging.getLogger("manthan_mcp")
 
 API_URL = os.environ.get("MANTHAN_API_URL", "http://localhost:8000").rstrip("/")
-TIMEOUT = 10.0
+TIMEOUT = 30.0  # raised from 10s: the API's cold-start model load can take a while
 SNIPPET_CHARS = 300  # matches retrieval.SNIPPET_CHARS; kept local -- no DB/model
                      # imports here (M1), so not imported from retrieval.py.
 
@@ -104,6 +104,11 @@ def _unreachable_message() -> str:
             "(docker compose up + the FastAPI app).")
 
 
+def _timeout_message() -> str:
+    return (f"Manthan API timed out after {int(TIMEOUT)}s (it may still be starting up). "
+            "Try again in a moment.")
+
+
 def _handle_response(resp: httpx.Response, path: str) -> tuple[Optional[dict], Optional[str]]:
     if resp.status_code == 404:
         try:
@@ -123,6 +128,9 @@ def _get(path: str, **params) -> tuple[Optional[dict], Optional[str]]:
     """GET ``path``; returns ``(json, None)`` on success, ``(None, message)`` otherwise."""
     try:
         resp = _client.get(f"{API_URL}{path}", params=params)
+    except httpx.TimeoutException:
+        logger.exception("GET %s timed out", path)
+        return None, _timeout_message()
     except httpx.RequestError:
         logger.exception("GET %s unreachable", path)
         return None, _unreachable_message()
@@ -132,6 +140,9 @@ def _get(path: str, **params) -> tuple[Optional[dict], Optional[str]]:
 def _post(path: str, json_body: dict) -> tuple[Optional[dict], Optional[str]]:
     try:
         resp = _client.post(f"{API_URL}{path}", json=json_body)
+    except httpx.TimeoutException:
+        logger.exception("POST %s timed out", path)
+        return None, _timeout_message()
     except httpx.RequestError:
         logger.exception("POST %s unreachable", path)
         return None, _unreachable_message()

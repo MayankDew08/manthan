@@ -22,6 +22,7 @@ import ingest
 import pipeline
 import retrieval
 from evals.rerank import Reranker
+from evals.rerank import load_model as load_reranker_model
 from link_extract import parse_github_url
 from link_ingest import mark_resolved
 from store import KnowledgeStore, _url_to_title
@@ -103,12 +104,22 @@ class SkipRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Open long-lived Neo4j/Qdrant clients for the API process."""
+    """Open long-lived Neo4j/Qdrant clients for the API process, and warm
+    everything up before serving: load the cross-encoder, embed one dummy
+    query, and build the corpus cache. Without this, whichever request
+    happens to arrive first pays for all three, and concurrent first
+    requests would each load the model separately.
+    """
     app.state.store = KnowledgeStore()
     app.state.vs = VectorStore()
     app.state.vs.ensure_collection()
     app.state.reranker = Reranker()
     app.state.corpus = retrieval.Corpus()
+
+    load_reranker_model()
+    app.state.vs._embed("warm-up query")
+    app.state.corpus.refresh(app.state.vs)
+
     yield
     app.state.vs.close()
     app.state.store.close()
