@@ -246,7 +246,16 @@ def test_search_description_does_not_expose_kind_yet():
 def test_live_browse_topic_handles_a_slash_topic_end_to_end():
     """mcp_server.browse_topic must percent-encode the slash so FastAPI's
     /topics/{name:path} route receives "AI/ML" whole, against the real,
-    running Manthan API (a real topic in this corpus has a "/" in its name)."""
+    running Manthan API (a real topic in this corpus has a "/" in its name).
+
+    This needs the API process itself, not just Qdrant/Neo4j (the other
+    --live tests' only dependency) -- skip rather than fail when it's down.
+    """
+    try:
+        httpx.get(f"{mcp_server.API_URL}/health", timeout=5).raise_for_status()
+    except httpx.HTTPError:
+        pytest.skip(f"Manthan API not running at {mcp_server.API_URL}")
+
     out = json.loads(mcp_server.browse_topic("AI/ML"))
     assert out["topic"] == "AI/ML"
     assert out["total"] > 0

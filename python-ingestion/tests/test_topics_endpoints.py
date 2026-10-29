@@ -137,9 +137,33 @@ def test_get_item_unknown_id_is_404_without_touching_neo4j():
     _use_vs({})
     _use_store([])  # any session.run() call here raises AssertionError
     with pytest.raises(app.HTTPException) as exc_info:
-        app.get_item("not-a-real-id")
+        app.get_item(str(uuid.uuid4()))
     assert exc_info.value.status_code == 404
-    assert "not-a-real-id" in exc_info.value.detail
+
+
+def test_get_item_malformed_id_is_404_without_calling_qdrant():
+    """Not a valid UUID -> straight to 404. The id IS the Qdrant point id
+    (M8), so a non-UUID can never match a real point; Qdrant is never
+    called (no 500 from a malformed retrieve)."""
+    def _boom(*a, **kw):
+        raise AssertionError("must not call Qdrant for a malformed id")
+
+    app.app.state.vs = SimpleNamespace(collection="manthan",
+                                       client=SimpleNamespace(retrieve=_boom))
+    with pytest.raises(app.HTTPException) as exc_info:
+        app.get_item("not-a-uuid")
+    assert exc_info.value.status_code == 404
+    assert "not-a-uuid" in exc_info.value.detail
+
+
+def test_get_item_well_formed_but_unknown_id_is_404():
+    """A syntactically valid UUID Qdrant simply doesn't have."""
+    _use_vs({})
+    unknown_id = str(uuid.uuid4())
+    with pytest.raises(app.HTTPException) as exc_info:
+        app.get_item(unknown_id)
+    assert exc_info.value.status_code == 404
+    assert unknown_id in exc_info.value.detail
 
 
 # ---- GET /topics: spelling-variant grouping -------------------------------------
