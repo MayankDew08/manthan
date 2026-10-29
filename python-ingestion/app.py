@@ -128,7 +128,8 @@ def do_search(req: SearchRequest):
     try:
         out = retrieval.search_s2(req.query, top_k=req.top_k, topics=req.topics,
                                   min_quality=req.min_quality, vs=app.state.vs,
-                                  reranker=app.state.reranker, corpus=app.state.corpus)
+                                  reranker=app.state.reranker, corpus=app.state.corpus,
+                                  store=app.state.store)
     except Exception:  # pragma: no cover
         SEARCH_REQUESTS.labels(engine="s2").inc()
         logger.exception("Search request failed")
