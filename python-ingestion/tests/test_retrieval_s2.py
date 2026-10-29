@@ -1,12 +1,16 @@
 """S2 retrieval (docs/mcp-server-spec.md section 2, tests per section 5).
 
-Offline only: a fake vector store, fake BM25-ranked documents, and an
-injected re-ranker scorer. No real Qdrant, no real model weights.
+Offline only: a fake vector store, fake BM25-ranked documents, a fake Neo4j
+store, and an injected re-ranker scorer. No real Qdrant, no real Neo4j, no
+real model weights.
 """
 
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Optional
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -18,31 +22,29 @@ from evals.rerank import Reranker  # noqa: E402
 # ---- fakes -------------------------------------------------------------------
 
 class FakeQdrantClient:
-    """Enough of the qdrant_client surface for Corpus.refresh and a filtered
-    cosine query: count, scroll (paged), and a filtered search.
+    """Enough of the qdrant_client surface for Corpus.refresh: count and a
+    paged scroll. ``fail_scroll_at`` raises on the Nth scroll call, to test
+    that an interrupted refresh leaves the old snapshot untouched.
     """
 
     def __init__(self, docs):
         self.docs = docs  # [(point_id, payload)], in corpus order
-        self.search_calls = []
+        self.scroll_calls = 0
+        self.fail_scroll_at: Optional[int] = None
 
     def count(self, collection_name, exact=True):
         return SimpleNamespace(count=len(self.docs))
 
     def scroll(self, collection_name, limit=256, offset=None, with_payload=False,
                with_vectors=False):
+        self.scroll_calls += 1
+        if self.fail_scroll_at == self.scroll_calls:
+            raise RuntimeError("boom: simulated Qdrant scroll failure")
         start = offset or 0
         batch = [SimpleNamespace(id=pid, payload=payload)
                  for pid, payload in self.docs[start:start + limit]]
         nxt = start + limit if start + limit < len(self.docs) else None
         return batch, nxt
-
-    def search(self, collection_name, query_vector, limit, query_filter=None):
-        """Only called when a filter is active: apply it, then keep corpus order."""
-        self.search_calls.append(query_filter)
-        kept = [(pid, payload) for pid, payload in self.docs
-                if _matches_filter(payload, query_filter)]
-        return [SimpleNamespace(id=pid, score=1.0) for pid, _ in kept[:limit]]
 
 
 def _matches_filter(payload, query_filter):
@@ -72,18 +74,65 @@ def _matches_condition(payload, condition):
 
 
 class FakeVectorStore:
-    """Cosine ranking fixed per test, independent of the fake Qdrant client."""
+    """Cosine ranking fixed per test; ``search`` applies ``query_filter`` itself,
+    same contract as ``vector_store.VectorStore.search`` (item 4: retrieval.py
+    never touches ``vs.client`` or ``vs._embed`` for the cosine query).
+    """
 
     def __init__(self, docs, cosine_order):
         self.client = FakeQdrantClient(docs)
         self.collection = "manthan"
         self._cosine_order = cosine_order  # [point_id, ...] rank order
+        self._payloads = dict(docs)
 
-    def search(self, query, limit):
-        return [SimpleNamespace(id=pid, score=1.0) for pid in self._cosine_order[:limit]]
+    def search(self, query, limit, query_filter=None):
+        ordered = [pid for pid in self._cosine_order
+                   if _matches_filter(self._payloads.get(pid, {}), query_filter)]
+        return [SimpleNamespace(id=pid, score=1.0) for pid in ordered[:limit]]
 
-    def _embed(self, query):
-        return [0.0]
+
+class FakeStore:
+    """Enough of ``store.KnowledgeStore`` for ``_graph_enrich``: one read-only
+    query over an in-memory CONTAINS edge list. ``query_count`` lets tests
+    assert the whole top-k batch is enriched in a single round trip.
+    """
+
+    def __init__(self, contains=()):
+        self._contains = list(contains)  # [{"sent_at", "text", "url", "title"}]
+        self.query_count = 0
+        self.driver = SimpleNamespace(session=lambda: _FakeSession(self))
+
+    def _answer(self, messages, urls):
+        self.query_count += 1
+        message_links = [
+            dict(c) for c in self._contains
+            if any(c["sent_at"] == m["sent_at"] and c["text"] == m["text"] for m in messages)
+        ]
+        link_attribution = [
+            {"url": url, "sent_at": min(
+                (c["sent_at"] for c in self._contains if c["url"] == url), default=None)}
+            for url in urls
+        ]
+        return {"message_links": message_links, "link_attribution": link_attribution}
+
+
+class _FakeSession:
+    def __init__(self, store):
+        self._store = store
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def run(self, query, **params):
+        record = self._store._answer(params.get("messages", []), params.get("urls", []))
+        return SimpleNamespace(single=lambda: record)
+
+
+def _store(contains=()):
+    return FakeStore(contains)
 
 
 def _reranker(scores):
@@ -107,13 +156,13 @@ def _reranker(scores):
     return r
 
 
-def _message(point_id, text, topics=None, quality=None):
-    return (point_id, {"type": "message", "text": text, "sent_at": "2026-01-01T00:00:00",
+def _message(point_id, text, topics=None, quality=None, sent_at="2026-01-01T00:00:00"):
+    return (point_id, {"type": "message", "text": text, "sent_at": sent_at,
                         "topics": topics or [], "quality": quality})
 
 
-def _link(point_id, summary, topics=None):
-    return (point_id, {"type": "link", "summary": summary, "title": "T", "url": "u",
+def _link(point_id, summary, topics=None, url="u"):
+    return (point_id, {"type": "link", "summary": summary, "title": "T", "url": url,
                         "topics": topics or []})
 
 
@@ -132,7 +181,7 @@ def test_order_equals_rrf_then_rerank_on_hand_computed_inputs():
     assert expected_fused == ["a", "b", "c"]
 
     reranker = _reranker({"a": 1.0, "b": 5.0, "c": 0.5})
-    out = retrieval.search_s2("q", vs=vs, reranker=reranker, corpus=corpus)
+    out = retrieval.search_s2("q", vs=vs, reranker=reranker, corpus=corpus, store=_store())
     assert [r["id"] for r in out["results"]] == ["b", "a", "c"]
 
 
@@ -140,7 +189,7 @@ def test_top_k_is_respected():
     docs = [_message(f"m{i}", f"text {i}") for i in range(10)]
     vs = FakeVectorStore(docs, cosine_order=[f"m{i}" for i in range(10)])
     reranker = _reranker({f"m{i}": float(i) for i in range(10)})
-    out = retrieval.search_s2("q", top_k=3, vs=vs, reranker=reranker)
+    out = retrieval.search_s2("q", top_k=3, vs=vs, reranker=reranker, store=_store())
     assert len(out["results"]) == 3
 
 
@@ -150,7 +199,7 @@ def test_confidence_strong_at_top_score_2_0():
     docs = [_message("a", "alpha")]
     vs = FakeVectorStore(docs, cosine_order=["a"])
     reranker = _reranker({"a": 2.0})
-    out = retrieval.search_s2("q", vs=vs, reranker=reranker)
+    out = retrieval.search_s2("q", vs=vs, reranker=reranker, store=_store())
     assert out["top_score"] == 2.0
     assert out["confidence"] == "strong"
 
@@ -159,7 +208,7 @@ def test_confidence_weak_just_under_threshold():
     docs = [_message("a", "alpha")]
     vs = FakeVectorStore(docs, cosine_order=["a"])
     reranker = _reranker({"a": 1.999})
-    out = retrieval.search_s2("q", vs=vs, reranker=reranker)
+    out = retrieval.search_s2("q", vs=vs, reranker=reranker, store=_store())
     assert out["confidence"] == "weak"
 
 
@@ -167,10 +216,12 @@ def test_confidence_none_when_empty():
     docs: list = []
     vs = FakeVectorStore(docs, cosine_order=[])
     reranker = _reranker({})
-    out = retrieval.search_s2("q", vs=vs, reranker=reranker)
+    store = _store()
+    out = retrieval.search_s2("q", vs=vs, reranker=reranker, store=store)
     assert out["results"] == []
     assert out["top_score"] is None
     assert out["confidence"] == "none"
+    assert store.query_count == 0  # nothing to enrich: no Neo4j round trip
 
 
 # ---- pre-pool filtering (M6) -----------------------------------------------------
@@ -187,7 +238,7 @@ def test_filtered_out_top_ranked_doc_never_appears():
     reranker = _reranker({"top": 10.0, "second": 1.0})
 
     out = retrieval.search_s2("q", vs=vs, reranker=reranker, corpus=corpus,
-                              topics=["python"])
+                              topics=["python"], store=_store())
     ids = [r["id"] for r in out["results"]]
     assert "top" not in ids
     assert ids == ["second"]
@@ -205,7 +256,7 @@ def test_min_quality_filter_excludes_low_quality_messages_but_not_links():
     reranker = _reranker({"lowq": 5.0, "highq": 3.0, "alink": 1.0})
 
     out = retrieval.search_s2("q", vs=vs, reranker=reranker, corpus=corpus,
-                              min_quality=5)
+                              min_quality=5, store=_store())
     ids = {r["id"] for r in out["results"]}
     assert "lowq" not in ids
     assert {"highq", "alink"} <= ids
@@ -218,9 +269,9 @@ def test_unfiltered_call_is_byte_identical_to_explicit_none_any():
     corpus.refresh(vs)
     reranker = _reranker({"a": 1.0, "b": 2.0})
 
-    implicit = retrieval.search_s2("q", vs=vs, reranker=reranker, corpus=corpus)
+    implicit = retrieval.search_s2("q", vs=vs, reranker=reranker, corpus=corpus, store=_store())
     explicit = retrieval.search_s2("q", vs=vs, reranker=reranker, corpus=corpus,
-                                   topics=None, min_quality=None, kind="any")
+                                   topics=None, min_quality=None, kind="any", store=_store())
     assert implicit == explicit
 
 
@@ -230,20 +281,60 @@ def test_result_keeps_every_key_search_py_carries_and_adds_id():
     docs = [_message("m1", "a message with text", topics=["t"])]
     vs = FakeVectorStore(docs, cosine_order=["m1"])
     reranker = _reranker({"m1": 3.0})
-    out = retrieval.search_s2("q", vs=vs, reranker=reranker)
+    out = retrieval.search_s2("q", vs=vs, reranker=reranker, store=_store())
     result = out["results"][0]
-    for key in ("type", "sent_at", "text", "topics", "entities", "score", "id"):
+    for key in ("type", "sent_at", "text", "topics", "entities", "score", "id",
+                "related_links"):
         assert key in result
 
 
-def test_snippet_is_cut_to_300_characters():
+def test_full_text_is_not_truncated():
+    """/search returns full text again (item 2); SNIPPET_CHARS is reserved
+    for Phase 2's MCP layer, not applied here."""
     long_text = "x" * 1000
     docs = [_message("m1", long_text)]
     vs = FakeVectorStore(docs, cosine_order=["m1"])
     reranker = _reranker({"m1": 1.0})
-    out = retrieval.search_s2("q", vs=vs, reranker=reranker)
-    assert len(out["results"][0]["text"]) == 300
+    out = retrieval.search_s2("q", vs=vs, reranker=reranker, store=_store())
+    assert len(out["results"][0]["text"]) == 1000
 
+
+def test_snippet_chars_constant_is_still_exported_for_phase_2():
+    assert retrieval.SNIPPET_CHARS == 300
+
+
+# ---- graph enrichment (item 1): related_links / link sent_at, one query ---------
+
+def test_graph_enrichment_fills_related_links_and_link_sent_at_in_one_query():
+    docs = [_message("m1", "message one"), _link("l1", "link summary", url="u")]
+    vs = FakeVectorStore(docs, cosine_order=["m1", "l1"])
+    reranker = _reranker({"m1": 3.0, "l1": 2.0})
+    store = _store(contains=[
+        {"sent_at": "2025-12-31T00:00:00", "text": "an earlier message",
+         "url": "u", "title": "T"},
+        {"sent_at": "2026-02-01T00:00:00", "text": "a later message",
+         "url": "u", "title": "T"},
+        {"sent_at": "2026-01-01T00:00:00", "text": "message one",
+         "url": "other-url", "title": "Other"},
+    ])
+
+    out = retrieval.search_s2("q", vs=vs, reranker=reranker, store=store)
+
+    by_id = {r["id"]: r for r in out["results"]}
+    assert by_id["m1"]["related_links"] == [{"url": "other-url", "title": "Other"}]
+    assert by_id["l1"]["sent_at"] == "2025-12-31T00:00:00"  # earliest of two edges to "u"
+    assert store.query_count == 1  # one round trip for the whole top-k batch
+
+
+def test_graph_enrichment_leaves_message_without_links_empty():
+    docs = [_message("m1", "lonely message")]
+    vs = FakeVectorStore(docs, cosine_order=["m1"])
+    reranker = _reranker({"m1": 1.0})
+    out = retrieval.search_s2("q", vs=vs, reranker=reranker, store=_store())
+    assert out["results"][0]["related_links"] == []
+
+
+# ---- Corpus: refresh-on-size-change, atomic snapshot swap (item 3) ---------------
 
 def test_corpus_rebuilds_only_when_collection_size_changes():
     docs = [_message("a", "alpha")]
@@ -258,3 +349,24 @@ def test_corpus_rebuilds_only_when_collection_size_changes():
     corpus.refresh(vs)  # size grew: rebuild
     assert corpus.bm25 is not first_bm25
     assert "l1" in corpus.ids
+
+
+def test_corpus_refresh_leaves_old_snapshot_untouched_if_interrupted():
+    """A crash mid-refresh (e.g. Qdrant drops a scroll page) must never leave
+    ``ids``/``payloads``/``bm25`` partially updated -- the old snapshot stays
+    whole until the single assignment that replaces it succeeds."""
+    docs = [_message("a", "alpha")]
+    vs = FakeVectorStore(docs, cosine_order=["a"])
+    corpus = retrieval.Corpus()
+    corpus.refresh(vs)
+    old_ids, old_bm25, old_payloads = corpus.ids, corpus.bm25, corpus.payloads
+
+    vs.client.docs.append(_link("l1", "a new link"))  # size changes: refresh must rebuild
+    vs.client.fail_scroll_at = vs.client.scroll_calls + 1  # fail the very next scroll call
+
+    with pytest.raises(RuntimeError):
+        corpus.refresh(vs)
+
+    assert corpus.ids == old_ids
+    assert corpus.bm25 is old_bm25
+    assert corpus.payloads == old_payloads
