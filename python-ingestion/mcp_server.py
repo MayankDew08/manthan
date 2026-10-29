@@ -160,7 +160,7 @@ def search(query: str, kind: Literal["any", "introduction"] = "any") -> str:
             "title": r.get("title", ""),
             "related_links": r.get("related_links") or [],
         })
-    _log_call("search", {"query": query}, len(items), confidence, None)
+    _log_call("search", {"query": query, "kind": kind}, len(items), confidence, None)
     return json.dumps({"results": items, "confidence": confidence}, ensure_ascii=False)
 
 
