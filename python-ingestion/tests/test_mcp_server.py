@@ -227,6 +227,21 @@ def test_every_call_appends_one_json_line_to_the_call_log(tmp_path, monkeypatch)
         assert row["tool"] == "search"
 
 
+def test_search_success_log_includes_kind(tmp_path, monkeypatch):
+    """The success-path log must carry kind too, same as the error path."""
+    log_path = _use_log(tmp_path, monkeypatch)
+
+    def handler(request):
+        return httpx.Response(200, json={"results": [], "confidence": "none"})
+
+    _use_transport(handler, monkeypatch)
+    mcp_server.search("q1", kind="introduction")
+
+    rows = _read_log(log_path)
+    assert len(rows) == 1
+    assert rows[0]["args"] == {"query": "q1", "kind": "introduction"}
+
+
 def test_error_calls_are_logged_too(tmp_path, monkeypatch):
     log_path = _use_log(tmp_path, monkeypatch)
 
