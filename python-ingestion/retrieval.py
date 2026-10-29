@@ -181,32 +181,30 @@ def _result(point_id: str, payload: dict, score: float) -> dict:
     }
 
 
-# One read-only round trip for the whole top-k batch: a message's related
+# Two independent queries for the whole top-k batch: a message's related
 # links (its own CONTAINS edges) and a link's attribution (the earliest
 # message that CONTAINS it) -- the batched equivalent of search.py's
-# per-result `_related_links` / `_link_attribution`.
-_GRAPH_ENRICH_QUERY = """
-CALL {
-    UNWIND $messages AS msg
-    MATCH (m:Message {sent_at: msg.sent_at, text: msg.text})
-    OPTIONAL MATCH (m)-[:CONTAINS]->(l:Link)
-    WITH msg, l
-    WHERE l IS NOT NULL
-    RETURN msg.sent_at AS sent_at, msg.text AS text, l.url AS url, l.title AS title
-}
-WITH collect({sent_at: sent_at, text: text, url: url, title: title}) AS message_links
-CALL {
-    UNWIND $urls AS url
-    MATCH (m2:Message)-[:CONTAINS]->(l2:Link {url: url})
-    RETURN url AS link_url, min(m2.sent_at) AS earliest_sent_at
-}
-RETURN message_links, collect({url: link_url, sent_at: earliest_sent_at}) AS link_attribution
+# per-result `_related_links` / `_link_attribution`. Kept as two plain
+# queries, not one pipeline of CALL subqueries: combining them made an
+# empty side (no urls, or no messages) collapse the whole query to zero
+# rows, silently dropping the other side's results too.
+_MESSAGE_LINKS_QUERY = """
+UNWIND $messages AS msg
+MATCH (m:Message {sent_at: msg.sent_at, text: msg.text})-[:CONTAINS]->(l:Link)
+RETURN msg.sent_at AS sent_at, msg.text AS text, l.url AS url, l.title AS title
+"""
+
+_LINK_ATTRIBUTION_QUERY = """
+UNWIND $urls AS url
+MATCH (m2:Message)-[:CONTAINS]->(l2:Link {url: url})
+RETURN url AS link_url, min(m2.sent_at) AS earliest_sent_at
 """
 
 
 def _graph_enrich(store, results: list[dict]) -> None:
     """Fill ``related_links`` (messages) and ``sent_at`` (links) on the final
-    results in place, with one Neo4j query regardless of how many of each."""
+    results in place. Two queries in one session, each skipped when its own
+    input list is empty."""
     messages = [{"sent_at": r["sent_at"], "text": r["text"]}
                 for r in results if r["type"] == "message"]
     urls = [r["url"] for r in results if r["type"] == "link" and r.get("url")]
@@ -214,16 +212,18 @@ def _graph_enrich(store, results: list[dict]) -> None:
         return
 
     with store.driver.session() as session:
-        record = session.run(_GRAPH_ENRICH_QUERY, messages=messages, urls=urls).single()
+        message_link_rows = (session.run(_MESSAGE_LINKS_QUERY, messages=messages).data()
+                             if messages else [])
+        link_attribution_rows = (session.run(_LINK_ATTRIBUTION_QUERY, urls=urls).data()
+                                 if urls else [])
 
     links_by_message: dict[tuple, list] = {}
-    for row in (record["message_links"] if record else []):
+    for row in message_link_rows:
         key = (row["sent_at"], row["text"])
         links_by_message.setdefault(key, []).append(
             {"url": row["url"], "title": row.get("title") or ""})
-    earliest_by_url = {row["url"]: row["sent_at"]
-                       for row in (record["link_attribution"] if record else [])
-                       if row.get("sent_at")}
+    earliest_by_url = {row["link_url"]: row["earliest_sent_at"]
+                       for row in link_attribution_rows if row.get("earliest_sent_at")}
 
     for r in results:
         if r["type"] == "message":
